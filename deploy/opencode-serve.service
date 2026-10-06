@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenCode headless server (Terminal Celular)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/martin
+Environment=PATH=/home/martin/.opencode/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/home/martin/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
