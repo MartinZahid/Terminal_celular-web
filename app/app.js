@@ -1,0 +1,555 @@
+'use strict';
+
+const API = '/oc';
+
+const $ = (id) => document.getElementById(id);
+
+const state = {
+  sessions: [],
+  currentId: null,
+  agents: [],
+  agent: localStorage.getItem('agent') || 'build',
+  model: null,
+  models: [],
+  perms: new Map(),
+  busy: false,
+};
+let es = null;
+
+const chatEl = $('chat');
+const inputEl = $('input');
+const sendBtn = $('btn-send');
+const stopBtn = $('btn-stop');
+const connEl = $('conn');
+const titleEl = $('session-title');
+const sessionListEl = $('session-list');
+const agentChipsEl = $('agent-chips');
+const modelLabelEl = $('model-label');
+
+function h(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+function uid() {
+  return 'msg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function toast(msg, ms = 2200) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(t._t);
+  t._t = setTimeout(() => { t.hidden = true; }, ms);
+}
+function fmtTime(ts) {
+  if (!ts) return '';
+  try {
+    return new Date(ts).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch { return ''; }
+}
+function md(raw) {
+  if (!raw) return '';
+  const parts = String(raw).split(/```/);
+  let out = '';
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      let code = parts[i];
+      const nl = code.indexOf('\n');
+      if (nl > -1) code = code.slice(nl + 1);
+      out += '<pre class="code">' + esc(code.replace(/\n$/, '')) + '</pre>';
+    } else {
+      let t = esc(parts[i]);
+      t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+      t = t.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+      out += t;
+    }
+  }
+  return out;
+}
+function autosize() {
+  inputEl.style.height = 'auto';
+  inputEl.style.height = Math.min(inputEl.scrollHeight, window.innerHeight * 0.3) + 'px';
+}
+function atBottom() {
+  return chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 120;
+}
+function scrollBottom(force) {
+  if (force || atBottom()) chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+const msgEls = new Map();
+
+function ensureMessage(info) {
+  if (!info || !info.id) return null;
+  let m = msgEls.get(info.id);
+  if (m) return m;
+  const root = h('div', 'msg ' + (info.role === 'user' ? 'user' : 'assistant'));
+  root.dataset.id = info.id;
+  if (info.role === 'user') {
+    const bubble = h('div', 'bubble');
+    root.appendChild(bubble);
+    m = { root, bubble, role: 'user' };
+  } else {
+    const textEl = h('div', 'text');
+    const partsWrap = h('div', 'parts');
+    root.appendChild(textEl);
+    root.appendChild(partsWrap);
+    m = { root, textEl, partsWrap, parts: new Map(), role: 'assistant', raw: '' };
+  }
+  msgEls.set(info.id, m);
+  chatEl.appendChild(root);
+  return m;
+}
+
+function partKey(part) {
+  return part.id || (part.type + ':' + (part.callID || ''));
+}
+
+function upsertPart(part) {
+  const m = msgEls.get(part.messageID);
+  if (!m) return;
+  const key = partKey(part);
+  if (part.type === 'text') {
+    if (m.role === 'user') {
+      m.bubble.innerHTML = md(part.text);
+    } else {
+      m.raw = part.text || '';
+      m.textEl.innerHTML = md(m.raw);
+    }
+    return;
+  }
+  if (m.role !== 'assistant') return;
+  let el = m.parts.get(key);
+  if (part.type === 'reasoning') {
+    if (!el) {
+      el = h('details', 'reasoning');
+      el.appendChild(h('summary', null, 'razonamiento'));
+      el.appendChild(h('pre'));
+      m.parts.set(key, el);
+      m.partsWrap.appendChild(el);
+    }
+    el.querySelector('pre').textContent = part.text || '';
+    return;
+  }
+  if (part.type === 'tool') {
+    const st = part.state || {};
+    const status = st.status || (st.time && st.time.end ? 'completed' : 'running');
+    if (!el) {
+      el = h('details', 'tool');
+      const sum = h('summary');
+      sum.appendChild(h('span', 'toolname', part.tool || 'tool'));
+      sum.appendChild(h('span', 'muted status'));
+      el._sum = sum;
+      el.appendChild(sum);
+      el.appendChild(h('pre'));
+      m.parts.set(key, el);
+      m.partsWrap.appendChild(el);
+    }
+    el.className = 'tool ' + status;
+    const label = st.title || status;
+    el._sum.querySelector('.toolname').textContent = part.tool || 'tool';
+    el._sum.querySelector('.status').textContent = ' · ' + label;
+    const body = el.querySelector('pre');
+    let txt = '';
+    if (st.input) txt += JSON.stringify(st.input, null, 2) + '\n';
+    if (st.output) txt += st.output;
+    if (st.error) txt += (typeof st.error === 'string' ? st.error : JSON.stringify(st.error, null, 2));
+    body.textContent = txt.trim();
+    return;
+  }
+  if (part.type === 'patch') {
+    if (!el) { el = h('div', 'patch'); m.parts.set(key, el); m.partsWrap.appendChild(el); }
+    el.textContent = 'patch · ' + (part.files || []).join(', ');
+    return;
+  }
+  if (part.type === 'compaction') {
+    if (!el) { el = h('div', 'muted'); el.textContent = '… compactando contexto'; m.parts.set(key, el); m.partsWrap.appendChild(el); }
+    return;
+  }
+  if (part.type === 'retry') {
+    if (!el) { el = h('div', 'muted'); m.parts.set(key, el); m.partsWrap.appendChild(el); }
+    el.textContent = 'reintentando…';
+    return;
+  }
+}
+
+async function loadMessages(id) {
+  chatEl.innerHTML = '';
+  msgEls.clear();
+  let list;
+  try {
+    const r = await fetch(API + '/session/' + id + '/message?limit=200');
+    if (!r.ok) return;
+    list = await r.json();
+  } catch { return; }
+  for (const item of list) {
+    ensureMessage(item.info);
+    for (const p of (item.parts || [])) upsertPart(p);
+  }
+  scrollBottom(true);
+}
+
+function renderSessions() {
+  sessionListEl.innerHTML = '';
+  for (const s of state.sessions) {
+    const item = h('div', 'session-item' + (s.id === state.currentId ? ' active' : ''));
+    const st = h('div', 'st');
+    st.appendChild(h('div', 'stitle', s.title || 'Sin título'));
+    st.appendChild(h('div', 'stime', fmtTime(s.time && s.time.updated)));
+    item.appendChild(st);
+    const del = h('button', 'del', '🗑');
+    del.onclick = (e) => { e.stopPropagation(); removeSession(s.id); };
+    item.appendChild(del);
+    item.onclick = () => { selectSession(s.id); closeDrawer(); };
+    sessionListEl.appendChild(item);
+  }
+}
+
+async function loadSessions() {
+  const r = await fetch(API + '/session');
+  if (!r.ok) return;
+  state.sessions = await r.json();
+  state.sessions.sort((a, b) => ((b.time && b.time.updated) || 0) - ((a.time && a.time.updated) || 0));
+  renderSessions();
+}
+
+async function selectSession(id) {
+  state.currentId = id;
+  const s = state.sessions.find((x) => x.id === id);
+  titleEl.textContent = (s && s.title) || 'Chat';
+  renderSessions();
+  await loadMessages(id);
+}
+
+async function newSession() {
+  try {
+    const r = await fetch(API + '/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Nuevo chat' }) });
+    const s = await r.json();
+    state.sessions.unshift(s);
+    state.currentId = s.id;
+    titleEl.textContent = s.title || 'Nuevo chat';
+    chatEl.innerHTML = '';
+    msgEls.clear();
+    renderSessions();
+    closeDrawer();
+    inputEl.focus();
+  } catch { toast('No se pudo crear el chat'); }
+}
+
+async function removeSession(id) {
+  if (!confirm('¿Borrar este chat?')) return;
+  try { await fetch(API + '/session/' + id, { method: 'DELETE' }); } catch { return; }
+  state.sessions = state.sessions.filter((s) => s.id !== id);
+  if (state.currentId === id) {
+    state.currentId = null;
+    chatEl.innerHTML = '';
+    msgEls.clear();
+    titleEl.textContent = 'Sin chat';
+  }
+  renderSessions();
+}
+
+async function renameSession() {
+  if (!state.currentId) return;
+  const s = state.sessions.find((x) => x.id === state.currentId);
+  if (!s) return;
+  const t = prompt('Título del chat:', s.title || '');
+  if (t == null) return;
+  try {
+    await fetch(API + '/session/' + state.currentId, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: t }) });
+  } catch {}
+  s.title = t;
+  titleEl.textContent = t;
+  renderSessions();
+}
+
+function renderAgents() {
+  agentChipsEl.innerHTML = '';
+  for (const a of state.agents) {
+    const b = h('button', 'chip' + (a.name === state.agent ? ' active' : ''), a.name);
+    b.onclick = () => { state.agent = a.name; localStorage.setItem('agent', a.name); renderAgents(); };
+    agentChipsEl.appendChild(b);
+  }
+}
+
+async function loadAgents() {
+  let all;
+  try {
+    const r = await fetch(API + '/agent');
+    if (!r.ok) return;
+    all = await r.json();
+  } catch { return; }
+  state.agents = all.filter((a) => a.mode === 'primary' || a.mode === 'all');
+  if (!state.agents.length) state.agents = all;
+  if (!state.agents.find((a) => a.name === state.agent)) {
+    const b = state.agents.find((a) => a.name === 'build');
+    state.agent = (b && b.name) || (state.agents[0] && state.agents[0].name) || 'build';
+  }
+  renderAgents();
+}
+
+function renderModelLabel() {
+  if (!state.model) { modelLabelEl.textContent = 'Modelo'; return; }
+  const m = state.models.find((x) => x.providerID === state.model.providerID && x.id === state.model.modelID);
+  modelLabelEl.textContent = m ? m.name : state.model.modelID;
+}
+
+async function loadModels() {
+  let data;
+  try {
+    const r = await fetch(API + '/config/providers');
+    if (!r.ok) return;
+    data = await r.json();
+  } catch { return; }
+  const flat = [];
+  for (const p of (data.providers || [])) {
+    for (const mid of Object.keys(p.models || {})) {
+      const mm = p.models[mid] || {};
+      flat.push({ providerID: p.id, providerName: p.name || p.id, id: mid, name: mm.name || mid });
+    }
+  }
+  state.models = flat;
+  const saved = localStorage.getItem('model');
+  if (saved) { try { state.model = JSON.parse(saved); } catch {} }
+  if (!state.model && data.default) {
+    const entry = Object.entries(data.default)[0];
+    if (entry) state.model = { providerID: entry[0], modelID: entry[1] };
+  }
+  if (state.model && !flat.find((m) => m.providerID === state.model.providerID && m.id === state.model.modelID)) state.model = null;
+  renderModelLabel();
+}
+
+function renderModelList(q) {
+  const list = $('model-list');
+  list.innerHTML = '';
+  const query = (q || '').toLowerCase();
+  const groups = {};
+  for (const m of state.models) {
+    if (query && !(m.name.toLowerCase().includes(query) || m.id.toLowerCase().includes(query) || m.providerName.toLowerCase().includes(query))) continue;
+    (groups[m.providerName] = groups[m.providerName] || []).push(m);
+  }
+  for (const prov of Object.keys(groups)) {
+    list.appendChild(h('div', 'model-group', prov));
+    for (const m of groups[prov]) {
+      const active = state.model && state.model.providerID === m.providerID && state.model.modelID === m.id;
+      const it = h('div', 'model-item' + (active ? ' active' : ''), m.name);
+      it.onclick = () => {
+        state.model = { providerID: m.providerID, modelID: m.id };
+        localStorage.setItem('model', JSON.stringify(state.model));
+        renderModelLabel();
+        $('sheet-model').hidden = true;
+      };
+      list.appendChild(it);
+    }
+  }
+}
+
+function openModelSheet() {
+  $('model-search').value = '';
+  renderModelList('');
+  $('sheet-model').hidden = false;
+  setTimeout(() => $('model-search').focus(), 50);
+}
+
+function setBusy(b) {
+  state.busy = b;
+  sendBtn.hidden = b;
+  stopBtn.hidden = !b;
+}
+
+async function send() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+  if (!state.currentId) await newSession();
+  if (!state.currentId) return;
+  inputEl.value = '';
+  autosize();
+  const messageID = uid();
+  ensureMessage({ id: messageID, sessionID: state.currentId, role: 'user', time: { created: Date.now() } });
+  upsertPart({ id: 'p_' + messageID, messageID, sessionID: state.currentId, type: 'text', text });
+  scrollBottom(true);
+  const body = { parts: [{ type: 'text', text }], agent: state.agent, messageID };
+  if (state.model) body.model = { providerID: state.model.providerID, modelID: state.model.modelID };
+  setBusy(true);
+  try {
+    const r = await fetch(API + '/session/' + state.currentId + '/prompt_async', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok && r.status !== 204) { toast('Error ' + r.status); setBusy(false); }
+  } catch { toast('Sin conexión'); setBusy(false); }
+}
+
+async function abort() {
+  if (!state.currentId) return;
+  try { await fetch(API + '/session/' + state.currentId + '/abort', { method: 'POST' }); } catch {}
+  setBusy(false);
+}
+
+function renderPerms() {
+  const list = $('perm-list');
+  list.innerHTML = '';
+  if (state.perms.size === 0) { $('sheet-perm').hidden = true; return; }
+  for (const p of state.perms.values()) {
+    const card = h('div', 'perm');
+    card.appendChild(h('div', 'ptitle', p.title || p.type || 'Permiso'));
+    const meta = p.metadata ? (p.metadata.command || p.metadata.filepath || JSON.stringify(p.metadata)) : '';
+    if (meta) card.appendChild(h('div', 'pmeta', String(meta)));
+    const acts = h('div', 'pactions');
+    const once = h('button', 'allow', 'Permitir');
+    once.onclick = () => replyPerm(p.id, 'once');
+    const always = h('button', 'allow', 'Siempre');
+    always.onclick = () => replyPerm(p.id, 'always');
+    const reject = h('button', 'reject', 'Rechazar');
+    reject.onclick = () => replyPerm(p.id, 'reject');
+    acts.append(once, always, reject);
+    card.appendChild(acts);
+    list.appendChild(card);
+  }
+  $('sheet-perm').hidden = false;
+}
+
+async function replyPerm(id, response) {
+  if (!state.currentId) return;
+  try {
+    await fetch(API + '/session/' + state.currentId + '/permissions/' + id, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response }) });
+  } catch {}
+  state.perms.delete(id);
+  renderPerms();
+}
+
+function handleEvent(type, p) {
+  switch (type) {
+    case 'server.connected':
+      connEl.className = 'dot on';
+      break;
+    case 'message.updated': {
+      const info = p.info;
+      if (!info || info.sessionID !== state.currentId) break;
+      ensureMessage(info);
+      if (info.role === 'assistant' && info.time && info.time.completed) setBusy(false);
+      break;
+    }
+    case 'message.part.updated': {
+      const part = p.part;
+      if (!part || part.sessionID !== state.currentId) break;
+      if (!msgEls.has(part.messageID)) ensureMessage({ id: part.messageID, sessionID: part.sessionID, role: 'assistant' });
+      upsertPart(part);
+      scrollBottom();
+      break;
+    }
+    case 'message.removed': {
+      if (p.sessionID !== state.currentId) break;
+      const m = msgEls.get(p.messageID);
+      if (m) { m.root.remove(); msgEls.delete(p.messageID); }
+      break;
+    }
+    case 'permission.updated': {
+      if (p.sessionID && p.sessionID !== state.currentId) break;
+      state.perms.set(p.id, p);
+      renderPerms();
+      break;
+    }
+    case 'permission.replied':
+      state.perms.delete(p.permissionID);
+      renderPerms();
+      break;
+    case 'session.created':
+    case 'session.updated': {
+      const info = p.info;
+      if (!info) break;
+      const i = state.sessions.findIndex((s) => s.id === info.id);
+      if (i >= 0) state.sessions[i] = info; else state.sessions.unshift(info);
+      state.sessions.sort((a, b) => ((b.time && b.time.updated) || 0) - ((a.time && a.time.updated) || 0));
+      if (info.id === state.currentId) titleEl.textContent = info.title || 'Chat';
+      renderSessions();
+      break;
+    }
+    case 'session.deleted':
+      if (p.info) { state.sessions = state.sessions.filter((s) => s.id !== p.info.id); renderSessions(); }
+      break;
+    case 'session.status':
+      if (p.sessionID === state.currentId) setBusy(!!(p.status && p.status.type === 'busy'));
+      break;
+    case 'session.idle':
+      if (p.sessionID === state.currentId) setBusy(false);
+      break;
+  }
+}
+
+function connectEvents() {
+  if (es) es.close();
+  es = new EventSource(API + '/event');
+  es.onopen = () => { connEl.className = 'dot on'; };
+  es.onerror = () => { connEl.className = 'dot off'; };
+  es.onmessage = (e) => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch { return; }
+    handleEvent(ev.type, ev.properties || {});
+  };
+}
+
+function openDrawer() { $('drawer').hidden = false; $('scrim').hidden = false; }
+function closeDrawer() { $('drawer').hidden = true; $('scrim').hidden = true; }
+
+function showDisabled() {
+  const d = h('div');
+  d.style.cssText = 'position:fixed;inset:0;z-index:70;display:grid;place-items:center;text-align:center;background:var(--bg);padding:24px';
+  d.innerHTML = '<div><h1>Terminal desactivada</h1><p style="color:var(--muted)">Actívala para usar la app.</p><a href="/auth/terminal-on">Activar terminal</a></div>';
+  document.body.appendChild(d);
+}
+
+function showPin() {
+  const screen = $('pin-screen');
+  screen.hidden = false;
+  $('pin-input').focus();
+  $('pin-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const pin = $('pin-input').value;
+    try {
+      const r = await fetch('/auth/verify-pin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pin }) });
+      if (r.ok) { screen.hidden = true; start(); }
+      else { $('pin-error').hidden = false; $('pin-error').textContent = 'PIN incorrecto'; }
+    } catch { $('pin-error').hidden = false; $('pin-error').textContent = 'Error de conexión'; }
+  };
+}
+
+async function start() {
+  $('pin-screen').hidden = true;
+  connectEvents();
+  await Promise.all([loadAgents(), loadModels()]).catch(() => {});
+  await loadSessions().catch(() => {});
+  if (state.sessions.length) await selectSession(state.sessions[0].id);
+  else await newSession();
+}
+
+async function boot() {
+  let me;
+  try {
+    me = await (await fetch('/auth/me')).json();
+  } catch { toast('No se pudo conectar con el servidor'); return; }
+  if (!me.authenticated) { location.href = '/auth/login'; return; }
+  if (me.pinConfigured && !me.pinVerified) { showPin(); return; }
+  if (me.enabled === false) { showDisabled(); return; }
+  start();
+}
+
+sendBtn.onclick = send;
+stopBtn.onclick = abort;
+$('btn-new').onclick = newSession;
+$('btn-new2').onclick = newSession;
+$('btn-drawer').onclick = openDrawer;
+$('scrim').onclick = closeDrawer;
+titleEl.onclick = renameSession;
+$('btn-model').onclick = openModelSheet;
+$('model-search').oninput = (e) => renderModelList(e.target.value);
+document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => { b.closest('.sheet').hidden = true; }; });
+$('sheet-model').onclick = (e) => { if (e.target.id === 'sheet-model') $('sheet-model').hidden = true; };
+$('sheet-perm').onclick = (e) => { if (e.target.id === 'sheet-perm') $('sheet-perm').hidden = true; };
+inputEl.addEventListener('input', autosize);
+inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/app/sw.js').catch(() => {});
+
+boot();

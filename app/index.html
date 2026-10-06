@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Terminal">
+<link rel="manifest" href="/app/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/app/icons/icon-192.png">
+<link rel="icon" href="/app/icons/icon-192.png">
+<link rel="stylesheet" href="/app/app.css">
+<title>Terminal Celular</title>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <button id="btn-drawer" class="icon" aria-label="Chats">☰</button>
+    <button id="session-title" class="title">Cargando…</button>
+    <span id="conn" class="dot" title="Conexión"></span>
+    <button id="btn-new" class="icon" aria-label="Nuevo chat">＋</button>
+  </header>
+
+  <div id="chips">
+    <div id="agent-chips"></div>
+    <button id="btn-model" class="chip"><span id="model-label">Modelo</span></button>
+  </div>
+
+  <main id="chat" aria-live="polite"></main>
+
+  <footer id="composer">
+    <textarea id="input" rows="1" placeholder="Escribe un mensaje…"
+      autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="false"></textarea>
+    <button id="btn-send" class="send" aria-label="Enviar">➤</button>
+    <button id="btn-stop" class="send stop" aria-label="Detener" hidden>■</button>
+  </footer>
+</div>
+
+<div id="scrim" class="scrim" hidden></div>
+<aside id="drawer" hidden>
+  <div class="drawer-head"><strong>Chats</strong><button id="btn-new2" class="chip">＋ Nuevo</button></div>
+  <div id="session-list"></div>
+  <div class="drawer-foot">
+    <a href="/terminal">Terminal PC</a>
+    <a href="/auth/logout">Salir</a>
+  </div>
+</aside>
+
+<div id="sheet-model" class="sheet" hidden>
+  <div class="sheet-card">
+    <header><strong>Modelo</strong><button class="close" data-close>✕</button></header>
+    <input id="model-search" placeholder="Buscar modelo…" autocomplete="off" spellcheck="false">
+    <div id="model-list"></div>
+  </div>
+</div>
+
+<div id="sheet-perm" class="sheet" hidden>
+  <div class="sheet-card">
+    <header><strong>Permiso requerido</strong></header>
+    <div id="perm-list"></div>
+  </div>
+</div>
+
+<div id="pin-screen" hidden>
+  <form id="pin-form">
+    <h1>Terminal Celular</h1>
+    <p>Introduce tu PIN</p>
+    <input id="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="PIN">
+    <button type="submit">Entrar</button>
+    <p id="pin-error" class="err" hidden></p>
+  </form>
+</div>
+
+<div id="toast" hidden></div>
+<script src="/app/app.js"></script>
+</body>
+</html>
