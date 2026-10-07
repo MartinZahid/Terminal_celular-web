@@ -12,6 +12,7 @@ const state = {
   model: null,
   models: [],
   perms: new Map(),
+  questions: new Map(),
   busy: false,
 };
 let es = null;
@@ -420,6 +421,7 @@ function stopPolling() {
 }
 
 async function pollOnce() {
+  pollRequests();
   if (!state.currentId) return;
   await mergeMessages(state.currentId).catch(() => {});
   try {
@@ -449,6 +451,7 @@ function resync() {
   connectEvents();
   if (state.currentId) mergeMessages(state.currentId).catch(() => {});
   pollOnce();
+  pollRequests();
 }
 
 async function checkBusy() {
@@ -491,36 +494,121 @@ async function abort() {
   setBusy(false);
 }
 
-function renderPerms() {
+function renderRequests() {
   const list = $('perm-list');
   list.innerHTML = '';
-  if (state.perms.size === 0) { $('sheet-perm').hidden = true; return; }
-  for (const p of state.perms.values()) {
+  const cur = state.currentId;
+  const perms = [...state.perms.values()].filter((p) => !p.sessionID || p.sessionID === cur);
+  const questions = [...state.questions.values()].filter((q) => !q.sessionID || q.sessionID === cur);
+  if (!perms.length && !questions.length) { $('sheet-perm').hidden = true; return; }
+
+  for (const p of perms) {
     const card = h('div', 'perm');
     card.appendChild(h('div', 'ptitle', p.title || p.type || 'Permiso'));
     const meta = p.metadata ? (p.metadata.command || p.metadata.filepath || JSON.stringify(p.metadata)) : '';
     if (meta) card.appendChild(h('div', 'pmeta', String(meta)));
     const acts = h('div', 'pactions');
     const once = h('button', 'allow', 'Permitir');
-    once.onclick = () => replyPerm(p.id, 'once');
+    once.onclick = () => replyPerm(p.id, p.sessionID || cur, 'once');
     const always = h('button', 'allow', 'Siempre');
-    always.onclick = () => replyPerm(p.id, 'always');
+    always.onclick = () => replyPerm(p.id, p.sessionID || cur, 'always');
     const reject = h('button', 'reject', 'Rechazar');
-    reject.onclick = () => replyPerm(p.id, 'reject');
+    reject.onclick = () => replyPerm(p.id, p.sessionID || cur, 'reject');
     acts.append(once, always, reject);
+    card.appendChild(acts);
+    list.appendChild(card);
+  }
+
+  for (const req of questions) {
+    const card = h('div', 'perm');
+    const qs = req.questions || [];
+    const selected = qs.map(() => []);
+    qs.forEach((q, qi) => {
+      if (q.header) card.appendChild(h('div', 'ptitle', q.header));
+      card.appendChild(h('div', 'pmeta', q.question || ''));
+      const opts = h('div', 'qopts');
+      (q.options || []).forEach((opt) => {
+        const b = h('button', 'qopt', opt.label);
+        if (opt.description) b.title = opt.description;
+        b.onclick = () => {
+          if (q.multiple) {
+            const i = selected[qi].indexOf(opt.label);
+            if (i >= 0) selected[qi].splice(i, 1); else selected[qi].push(opt.label);
+            b.classList.toggle('active');
+          } else {
+            selected[qi] = [opt.label];
+            [...opts.children].forEach((c) => c.classList.remove('active'));
+            b.classList.add('active');
+          }
+        };
+        opts.appendChild(b);
+      });
+      card.appendChild(opts);
+      if (q.custom) {
+        const inp = h('input', 'qcustom');
+        inp.placeholder = 'Escribe tu respuesta…';
+        inp.oninput = () => { selected[qi] = inp.value.trim() ? [inp.value.trim()] : []; };
+        card.appendChild(inp);
+      }
+    });
+    const acts = h('div', 'pactions');
+    const answer = h('button', 'allow', 'Responder');
+    answer.onclick = () => answerQuestion(req.id, req.sessionID || cur, selected);
+    const reject = h('button', 'reject', 'Rechazar');
+    reject.onclick = () => rejectQuestion(req.id, req.sessionID || cur);
+    acts.append(answer, reject);
     card.appendChild(acts);
     list.appendChild(card);
   }
   $('sheet-perm').hidden = false;
 }
 
-async function replyPerm(id, response) {
-  if (!state.currentId) return;
+async function replyPerm(id, sessionId, reply) {
+  const sid = sessionId || state.currentId;
+  if (!sid) return;
   try {
-    await fetch(API + '/session/' + state.currentId + '/permissions/' + id, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response }) });
+    await fetch(API + '/api/session/' + sid + '/permission/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reply }) });
   } catch {}
   state.perms.delete(id);
-  renderPerms();
+  renderRequests();
+}
+
+async function answerQuestion(id, sessionId, answers) {
+  const sid = sessionId || state.currentId;
+  if (!sid) return;
+  try {
+    await fetch(API + '/api/session/' + sid + '/question/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers }) });
+  } catch {}
+  state.questions.delete(id);
+  renderRequests();
+}
+
+async function rejectQuestion(id, sessionId) {
+  const sid = sessionId || state.currentId;
+  if (!sid) return;
+  try {
+    await fetch(API + '/api/session/' + sid + '/question/' + id + '/reject', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
+  } catch {}
+  state.questions.delete(id);
+  renderRequests();
+}
+
+async function pollRequests() {
+  try {
+    const [qr, pr] = await Promise.all([
+      fetch(API + '/api/question/request').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(API + '/api/permission/request').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+    if (qr) {
+      state.questions.clear();
+      for (const q of (Array.isArray(qr) ? qr : (qr.data || []))) state.questions.set(q.id, q);
+    }
+    if (pr) {
+      state.perms.clear();
+      for (const p of (Array.isArray(pr) ? pr : (pr.data || []))) state.perms.set(p.id, p);
+    }
+    renderRequests();
+  } catch {}
 }
 
 function handleEvent(type, p) {
@@ -552,12 +640,12 @@ function handleEvent(type, p) {
     case 'permission.updated': {
       if (p.sessionID && p.sessionID !== state.currentId) break;
       state.perms.set(p.id, p);
-      renderPerms();
+      renderRequests();
       break;
     }
     case 'permission.replied':
       state.perms.delete(p.permissionID);
-      renderPerms();
+      renderRequests();
       break;
     case 'session.created':
     case 'session.updated': {
@@ -636,6 +724,7 @@ async function start() {
   await loadSessions().catch(() => {});
   if (state.sessions.length) await selectSession(state.sessions[0].id);
   else await newSession();
+  setInterval(() => { if (!document.hidden) pollRequests(); }, 2000);
 }
 
 async function boot() {

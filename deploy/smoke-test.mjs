@@ -104,6 +104,12 @@ try {
   const b2 = await req('/oc/config', { headers: { cookie } })
   check('/oc/config -> 403', b2.status === 403, 'status ' + b2.status)
 
+  // Rutas interactivas permitidas (preguntas y permisos)
+  const qr = await req('/oc/api/question/request', { headers: { cookie } })
+  check('/oc/api/question/request -> 200', qr.status === 200, 'status ' + qr.status)
+  const prq = await req('/oc/api/permission/request', { headers: { cookie } })
+  check('/oc/api/permission/request -> 200', prq.status === 200, 'status ' + prq.status)
+
   // CRUD de sesiones
   const created = await req('/oc/session', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ title: 'smoke-test' }) })
   const sess = await created.json().catch(() => ({}))

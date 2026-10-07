@@ -40,6 +40,10 @@ function allowedPath(targetPath: string): boolean {
   const p = targetPath.split('?')[0]
   if (p === '/agent' || p === '/event' || p === '/config/providers') return true
   if (p === '/session' || p.startsWith('/session/')) return true
+  // API v2 (preguntas y permisos interactivos)
+  if (p === '/api/question/request' || p === '/api/permission/request') return true
+  if (/^\/api\/session\/[^/]+\/question(\/[^/]+\/(reply|reject))?$/.test(p)) return true
+  if (/^\/api\/session\/[^/]+\/permission(\/[^/]+\/reply)?$/.test(p)) return true
   return false
 }
 
