@@ -97,14 +97,12 @@ function ensureMessage(info) {
     root.appendChild(bubble);
     m = { root, bubble, role: 'user' };
   } else {
-    const textEl = h('div', 'text');
     const partsWrap = h('div', 'parts');
     const errEl = h('div', 'err');
     errEl.hidden = true;
-    root.appendChild(textEl);
     root.appendChild(partsWrap);
     root.appendChild(errEl);
-    m = { root, textEl, partsWrap, errEl, parts: new Map(), role: 'assistant', raw: '' };
+    m = { root, partsWrap, errEl, parts: new Map(), role: 'assistant' };
   }
   msgEls.set(info.id, m);
   chatEl.appendChild(root);
@@ -132,10 +130,15 @@ function upsertPart(part) {
   if (part.type === 'text') {
     if (m.role === 'user') {
       m.bubble.innerHTML = md(part.text);
-    } else {
-      m.raw = part.text || '';
-      m.textEl.innerHTML = md(m.raw);
+      return;
     }
+    let tel = m.parts.get(key);
+    if (!tel) {
+      tel = h('div', 'text');
+      m.parts.set(key, tel);
+      m.partsWrap.appendChild(tel);
+    }
+    tel.innerHTML = md(part.text || '');
     return;
   }
   if (m.role !== 'assistant') return;
@@ -398,26 +401,42 @@ function openModelSheet() {
   setTimeout(() => $('model-search').focus(), 50);
 }
 
+let pollInFlight = false;
+let requestsSig = '';
+let requestsDismissed = false;
+
 function setBusy(b) {
   const was = state.busy;
   state.busy = b;
   sendBtn.hidden = b;
   stopBtn.hidden = !b;
   if (busyWatch) { clearTimeout(busyWatch); busyWatch = null; }
-  if (b) { busyWatch = setTimeout(checkBusy, 15000); startPolling(1000); }
+  if (b) { busyWatch = setTimeout(checkBusy, 15000); schedulePoll(1200); }
   else {
-    stopPolling();
     if (was) loadSessions().catch(() => {});
+    schedulePoll(8000);
   }
 }
 
-function startPolling(ms) {
-  if (pollTimer) return;
-  pollTimer = setInterval(pollOnce, ms);
+function schedulePoll(ms) {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(pollTick, ms);
 }
 
-function stopPolling() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+async function pollTick() {
+  pollTimer = null;
+  if (document.hidden) { schedulePoll(5000); return; }
+  if (pollInFlight) { schedulePoll(2000); return; }
+  pollInFlight = true;
+  try {
+    await pollRequests();
+    if (state.currentId) {
+      await mergeMessages(state.currentId).catch(() => {});
+      await refreshStatus();
+    }
+  } catch {}
+  pollInFlight = false;
+  schedulePoll(state.busy ? 3000 : 10000);
 }
 
 async function pollOnce() {
@@ -452,6 +471,7 @@ function resync() {
   if (state.currentId) mergeMessages(state.currentId).catch(() => {});
   pollOnce();
   pollRequests();
+  schedulePoll(1200);
 }
 
 async function checkBusy() {
@@ -504,8 +524,8 @@ function renderRequests() {
 
   for (const p of perms) {
     const card = h('div', 'perm');
-    card.appendChild(h('div', 'ptitle', p.title || p.type || 'Permiso'));
-    const meta = p.metadata ? (p.metadata.command || p.metadata.filepath || JSON.stringify(p.metadata)) : '';
+    card.appendChild(h('div', 'ptitle', p.title || p.permission || p.type || 'Permiso'));
+    const meta = p.metadata ? (p.metadata.command || p.metadata.filepath || JSON.stringify(p.metadata)) : ((p.patterns || []).join(', '));
     if (meta) card.appendChild(h('div', 'pmeta', String(meta)));
     const acts = h('div', 'pactions');
     const once = h('button', 'allow', 'Permitir');
@@ -560,14 +580,14 @@ function renderRequests() {
     card.appendChild(acts);
     list.appendChild(card);
   }
-  $('sheet-perm').hidden = false;
+  if (!requestsDismissed) $('sheet-perm').hidden = false;
 }
 
 async function replyPerm(id, sessionId, reply) {
   const sid = sessionId || state.currentId;
   if (!sid) return;
   try {
-    await fetch(API + '/api/session/' + sid + '/permission/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ reply }) });
+    await fetch(API + '/session/' + sid + '/permissions/' + id, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response: reply }) });
   } catch {}
   state.perms.delete(id);
   renderRequests();
@@ -577,7 +597,7 @@ async function answerQuestion(id, sessionId, answers) {
   const sid = sessionId || state.currentId;
   if (!sid) return;
   try {
-    await fetch(API + '/api/session/' + sid + '/question/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers }) });
+    await fetch(API + '/session/' + sid + '/question/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers }) });
   } catch {}
   state.questions.delete(id);
   renderRequests();
@@ -587,7 +607,7 @@ async function rejectQuestion(id, sessionId) {
   const sid = sessionId || state.currentId;
   if (!sid) return;
   try {
-    await fetch(API + '/api/session/' + sid + '/question/' + id + '/reject', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
+    await fetch(API + '/session/' + sid + '/question/' + id + '/reject', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
   } catch {}
   state.questions.delete(id);
   renderRequests();
@@ -596,17 +616,19 @@ async function rejectQuestion(id, sessionId) {
 async function pollRequests() {
   try {
     const [qr, pr] = await Promise.all([
-      fetch(API + '/api/question/request').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(API + '/api/permission/request').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(API + '/question').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(API + '/permission').then((r) => (r.ok ? r.json() : null)).catch(() => null),
     ]);
-    if (qr) {
-      state.questions.clear();
-      for (const q of (Array.isArray(qr) ? qr : (qr.data || []))) state.questions.set(q.id, q);
-    }
-    if (pr) {
-      state.perms.clear();
-      for (const p of (Array.isArray(pr) ? pr : (pr.data || []))) state.perms.set(p.id, p);
-    }
+    const qs = Array.isArray(qr) ? qr : (qr && qr.data) || [];
+    const ps = Array.isArray(pr) ? pr : (pr && pr.data) || [];
+    const sig = [...ps.map((x) => 'p:' + x.id), ...qs.map((x) => 'q:' + x.id)].sort().join('|');
+    if (sig === requestsSig) return;
+    requestsSig = sig;
+    requestsDismissed = false;
+    state.questions.clear();
+    for (const q of qs) state.questions.set(q.id, q);
+    state.perms.clear();
+    for (const p of ps) state.perms.set(p.id, p);
     renderRequests();
   } catch {}
 }
@@ -724,7 +746,7 @@ async function start() {
   await loadSessions().catch(() => {});
   if (state.sessions.length) await selectSession(state.sessions[0].id);
   else await newSession();
-  setInterval(() => { if (!document.hidden) pollRequests(); }, 2000);
+  schedulePoll(1200);
 }
 
 async function boot() {
@@ -747,9 +769,9 @@ $('scrim').onclick = closeDrawer;
 titleEl.onclick = renameSession;
 $('btn-model').onclick = openModelSheet;
 $('model-search').oninput = (e) => renderModelList(e.target.value);
-document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => { b.closest('.sheet').hidden = true; }; });
+document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => { const s = b.closest('.sheet'); s.hidden = true; if (s && s.id === 'sheet-perm') requestsDismissed = true; }; });
 $('sheet-model').onclick = (e) => { if (e.target.id === 'sheet-model') $('sheet-model').hidden = true; };
-$('sheet-perm').onclick = (e) => { if (e.target.id === 'sheet-perm') $('sheet-perm').hidden = true; };
+$('sheet-perm').onclick = (e) => { if (e.target.id === 'sheet-perm') { $('sheet-perm').hidden = true; requestsDismissed = true; } };
 inputEl.addEventListener('input', autosize);
 inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
 
