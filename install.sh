@@ -7,39 +7,51 @@ WTS_DIR="${WTS_DIR:-/home/martin/Whatsapp-teamSync}"
 COFFE_DIR="${COFFE_DIR:-/home/martin/coffecode-web}"
 OC_PORT="${OC_PORT:-4096}"
 APP_DIR="${APP_DIR:-$REPO_DIR/app}"
+USER_UNIT_DIR="$HOME/.config/systemd/user"
+PW_FILE="$HOME/.config/terminal-celular/oc-password"
 
-echo "==> 1/6  Servicio systemd --user de opencode"
-mkdir -p "$HOME/.config/systemd/user"
-cp "$REPO_DIR/deploy/opencode-serve.service" "$HOME/.config/systemd/user/opencode-serve.service"
+# Fija Environment=KEY=VALUE en una unit systemd (idempotente).
+set_env() {
+  local f="$1" k="$2" v="$3"
+  [ -f "$f" ] || { echo "  AVISO: no existe $f"; return; }
+  if grep -q "^Environment=$k=" "$f"; then
+    sed -i "s#^Environment=$k=.*#Environment=$k=$v#" "$f"
+  else
+    awk -v line="Environment=$k=$v" '{ print } /^\[Service\]$/ { print line }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  fi
+}
+
+echo "==> 1/7  Contraseña del server opencode"
+mkdir -p "$(dirname "$PW_FILE")"
+if [ ! -s "$PW_FILE" ]; then
+  head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 32 > "$PW_FILE"
+  chmod 600 "$PW_FILE"
+fi
+OC_PW="$(cat "$PW_FILE")"
+
+echo "==> 2/7  Servicio systemd --user de opencode (con contraseña)"
+mkdir -p "$USER_UNIT_DIR"
+cp "$REPO_DIR/deploy/opencode-serve.service" "$USER_UNIT_DIR/opencode-serve.service"
+set_env "$USER_UNIT_DIR/opencode-serve.service" OPENCODE_SERVER_PASSWORD "$OC_PW"
 systemctl --user daemon-reload
 systemctl --user enable --now opencode-serve.service
 systemctl --user restart opencode-serve.service
 
-echo "==> 2/6  Copiar módulo de integración al server WTS"
+echo "==> 3/7  Copiar módulo de integración al server WTS"
 cp "$REPO_DIR/server/opencode-app.ts" "$WTS_DIR/server/src/opencode-app.ts"
 
-echo "==> 3/6  Aplicar enganches (idempotente)"
+echo "==> 4/7  Aplicar enganches (idempotente)"
 python3 "$REPO_DIR/deploy/patch.py" "$WTS_DIR" "$COFFE_DIR"
 
-echo "==> 4/6  Configurar APP_DIR en la unidad de WTS"
-UNIT="$HOME/.config/systemd/user/whatsapp-teamsync.service"
-if [ -f "$UNIT" ]; then
-  if grep -q '^Environment=APP_DIR=' "$UNIT"; then
-    sed -i "s#^Environment=APP_DIR=.*#Environment=APP_DIR=$APP_DIR#" "$UNIT"
-  else
-    awk -v appdir="$APP_DIR" '{ print } /^\[Service\]$/ { print "Environment=APP_DIR=" appdir }' "$UNIT" > "$UNIT.tmp"
-    mv "$UNIT.tmp" "$UNIT"
-  fi
-  systemctl --user daemon-reload
-  echo "  APP_DIR=$APP_DIR en whatsapp-teamsync.service"
-else
-  echo "  AVISO: no existe $UNIT; define APP_DIR=$APP_DIR manualmente en el servicio"
-fi
+echo "==> 5/7  Configurar WTS (APP_DIR + OC_PASSWORD)"
+set_env "$USER_UNIT_DIR/whatsapp-teamsync.service" APP_DIR "$APP_DIR"
+set_env "$USER_UNIT_DIR/whatsapp-teamsync.service" OC_PASSWORD "$OC_PW"
+systemctl --user daemon-reload
 
-echo "==> 5/6  Recompilar server WTS"
+echo "==> 6/7  Recompilar server WTS"
 ( cd "$WTS_DIR" && npm run build:server )
 
-echo "==> 6/6  Reiniciar servidores"
+echo "==> 7/7  Reiniciar servidores"
 systemctl --user restart whatsapp-teamsync.service
 # coffecode-web es un servicio de sistema con Restart=always; matar el proceso
 # hace que systemd lo relance con el código nuevo, sin necesitar sudo.
@@ -53,4 +65,4 @@ fi
 
 echo
 echo "Listo. Abre https://coffecode.lat/app en el celular."
-echo "opencode serve escucha en 127.0.0.1:$OC_PORT"
+echo "opencode serve escucha en 127.0.0.1:$OC_PORT (Basic auth, usuario 'opencode')."

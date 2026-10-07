@@ -2,11 +2,12 @@ import { existsSync, readFileSync } from 'fs'
 import { join, extname, normalize } from 'path'
 import * as http from 'http'
 import type { IncomingMessage, ServerResponse } from 'http'
-import { getSession, getSessionToken, clientIp, clientUa } from './auth.js'
+import { getSession, getSessionToken, clientIp, clientUa, pinConfigured, isTerminalDisabled } from './auth.js'
 
 const OC_HOST = process.env.OC_HOST || '127.0.0.1'
 const OC_PORT = Number(process.env.OC_PORT || 4096)
 const APP_DIR = process.env.APP_DIR || '/home/martin/terminal-celular/app'
+const OC_PASSWORD = process.env.OC_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ''
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -28,23 +29,44 @@ function authed(req: IncomingMessage): boolean {
   try {
     const token = getSessionToken(req)
     if (!token) return false
-    return !!getSession(token, clientIp(req), clientUa(req))
+    const session = getSession(token, clientIp(req), clientUa(req))
+    if (!session) return false
+    // El PIN y el interruptor "terminal desactivada" también aplican al proxy.
+    if (pinConfigured() && !session.pinVerified) return false
+    if (isTerminalDisabled()) return false
+    return true
   } catch {
     return false
   }
 }
 
-// Allowlist: el navegador solo puede alcanzar los endpoints que la app usa.
-// Cualquier otra ruta de la API de opencode queda bloqueada (403).
+// CSRF: en métodos mutantes, si el navegador manda Origin/Referer, debe
+// coincidir con el host. (Los navegadores siempre lo mandan en cross-site.)
+function sameOriginOk(req: IncomingMessage): boolean {
+  const m = req.method || 'GET'
+  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return true
+  const origin = req.headers.origin || req.headers.referer
+  if (!origin) return true
+  try {
+    return new URL(String(origin)).host === req.headers.host
+  } catch {
+    return false
+  }
+}
+
+// Allowlist estricta: el navegador solo alcanza los endpoints que la app usa.
 function allowedPath(targetPath: string): boolean {
-  const p = targetPath.split('?')[0]
+  let p = targetPath.split('?')[0]
+  try {
+    p = decodeURIComponent(p)
+  } catch {
+    return false
+  }
+  if (p.includes('..') || p.includes('\\') || p.includes('%2f') || p.includes('%2F')) return false
   if (p === '/agent' || p === '/event' || p === '/config/providers') return true
-  if (p === '/session' || p.startsWith('/session/')) return true
-  // API v2 (preguntas y permisos interactivos)
-  if (p === '/api/question/request' || p === '/api/permission/request') return true
-  if (/^\/api\/session\/[^/]+\/question(\/[^/]+\/(reply|reject))?$/.test(p)) return true
-  if (/^\/api\/session\/[^/]+\/permission(\/[^/]+\/reply)?$/.test(p)) return true
-  return false
+  if (p === '/question' || p === '/permission') return true
+  const SESSION_RE = /^\/session(\/status|\/[^/]+(\/(message|prompt_async|abort))?|\/[^/]+\/question(\/[^/]+\/(reply|reject))?|\/[^/]+\/permissions\/[^/]+)?$/
+  return SESSION_RE.test(p)
 }
 
 // Quita credenciales (API keys) antes de devolver JSON al navegador.
@@ -124,7 +146,10 @@ function serveApp(res: ServerResponse, urlPath: string): void {
 
 function proxy(req: IncomingMessage, res: ServerResponse, targetPath: string): void {
   const headers: http.OutgoingHttpHeaders = { ...(req.headers as Record<string, unknown>), host: `${OC_HOST}:${OC_PORT}` }
-  delete headers['accept-encoding']
+  // No filtrar credenciales del cliente ni cabeceras hop-by-hop al upstream.
+  for (const h of ['cookie', 'authorization', 'accept-encoding', 'connection', 'upgrade', 'keep-alive', 'te', 'trailer', 'transfer-encoding', 'proxy-authorization', 'proxy-authenticate']) delete headers[h]
+  // Autenticación propia del servidor opencode (si está configurada).
+  if (OC_PASSWORD) headers['authorization'] = 'Basic ' + Buffer.from('opencode:' + OC_PASSWORD).toString('base64')
   const preq = http.request(
     { host: OC_HOST, port: OC_PORT, path: targetPath, method: req.method, headers },
     (pres) => {
@@ -179,6 +204,11 @@ export function handleAppRequest(req: IncomingMessage, res: ServerResponse, url:
     return true
   }
   if (path === '/oc' || path.startsWith('/oc/')) {
+    if (!sameOriginOk(req)) {
+      res.writeHead(403, { 'content-type': 'application/json' })
+      res.end('{"error":"csrf"}')
+      return true
+    }
     if (!authed(req)) {
       res.writeHead(401, { 'content-type': 'application/json' })
       res.end('{"error":"unauthorized"}')

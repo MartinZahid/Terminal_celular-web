@@ -16,6 +16,7 @@
 // iniciada con Google; se comprueba aparte con una petición sin cookie (302/401).
 
 import http from 'http'
+import { readFileSync } from 'fs'
 
 const WTS_DIR = process.env.WTS_DIR || '/home/martin/Whatsapp-teamSync'
 const EMAIL = process.env.EMAIL || 'martinzahidpro@gmail.com'
@@ -26,6 +27,11 @@ const FRONT = process.env.FRONT || 'http://127.0.0.1:8080'
 
 process.env.DB_PATH = process.env.DB_PATH || WTS_DIR + '/server/data/metrics.db'
 process.env.APP_DIR = process.env.APP_DIR || '/home/martin/terminal-celular/app'
+if (!process.env.OC_PASSWORD) {
+  try {
+    process.env.OC_PASSWORD = readFileSync((process.env.HOME || '') + '/.config/terminal-celular/oc-password', 'utf8').trim()
+  } catch {}
+}
 
 const auth = await import(WTS_DIR + '/server/dist/server/src/auth.js')
 const { handleAppRequest } = await import(WTS_DIR + '/server/dist/server/src/opencode-app.js')
@@ -72,6 +78,7 @@ async function sseFirstEvent(cookie) {
 }
 
 const token = auth.createSession(EMAIL, '127.0.0.1', UA)
+try { const s = auth.getSession(token, '127.0.0.1', UA); if (s) s.pinVerified = true } catch {}
 const cookie = auth.sessionCookie(token, false).split(';')[0]
 
 console.log('Proxy en ' + BASE + '  ->  opencode ' + OC_HOST + ':' + OC_PORT)
@@ -105,10 +112,10 @@ try {
   check('/oc/config -> 403', b2.status === 403, 'status ' + b2.status)
 
   // Rutas interactivas permitidas (preguntas y permisos)
-  const qr = await req('/oc/api/question/request', { headers: { cookie } })
-  check('/oc/api/question/request -> 200', qr.status === 200, 'status ' + qr.status)
-  const prq = await req('/oc/api/permission/request', { headers: { cookie } })
-  check('/oc/api/permission/request -> 200', prq.status === 200, 'status ' + prq.status)
+  const qr = await req('/oc/question', { headers: { cookie } })
+  check('/oc/question -> 200', qr.status === 200, 'status ' + qr.status)
+  const prq = await req('/oc/permission', { headers: { cookie } })
+  check('/oc/permission -> 200', prq.status === 200, 'status ' + prq.status)
 
   // CRUD de sesiones
   const created = await req('/oc/session', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ title: 'smoke-test' }) })
