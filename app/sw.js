@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE = 'tc-v2';
+const CACHE = 'tc-v3';
 const SHELL = [
   '/app',
   '/app/app.css',

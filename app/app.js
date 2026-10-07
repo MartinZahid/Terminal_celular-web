@@ -228,12 +228,18 @@ async function mergeMessages(id) {
   scrollBottom();
 }
 
+function displayTitle(s) {
+  const t = s && s.title ? String(s.title) : '';
+  if (!t || /^new session - /i.test(t)) return 'Nuevo chat';
+  return t;
+}
+
 function renderSessions() {
   sessionListEl.innerHTML = '';
   for (const s of state.sessions) {
     const item = h('div', 'session-item' + (s.id === state.currentId ? ' active' : ''));
     const st = h('div', 'st');
-    st.appendChild(h('div', 'stitle', s.title || 'Sin título'));
+    st.appendChild(h('div', 'stitle', displayTitle(s)));
     st.appendChild(h('div', 'stime', fmtTime(s.time && s.time.updated)));
     item.appendChild(st);
     const del = h('button', 'del', '🗑');
@@ -255,7 +261,7 @@ async function loadSessions() {
 async function selectSession(id) {
   state.currentId = id;
   const s = state.sessions.find((x) => x.id === id);
-  titleEl.textContent = (s && s.title) || 'Chat';
+  titleEl.textContent = s ? displayTitle(s) : 'Chat';
   renderSessions();
   await loadMessages(id);
   refreshStatus();
@@ -263,11 +269,11 @@ async function selectSession(id) {
 
 async function newSession() {
   try {
-    const r = await fetch(API + '/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Nuevo chat' }) });
+    const r = await fetch(API + '/session', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
     const s = await r.json();
     state.sessions.unshift(s);
     state.currentId = s.id;
-    titleEl.textContent = s.title || 'Nuevo chat';
+    titleEl.textContent = 'Nuevo chat';
     chatEl.innerHTML = '';
     msgEls.clear();
     renderSessions();
@@ -392,12 +398,16 @@ function openModelSheet() {
 }
 
 function setBusy(b) {
+  const was = state.busy;
   state.busy = b;
   sendBtn.hidden = b;
   stopBtn.hidden = !b;
   if (busyWatch) { clearTimeout(busyWatch); busyWatch = null; }
   if (b) { busyWatch = setTimeout(checkBusy, 15000); startPolling(1000); }
-  else stopPolling();
+  else {
+    stopPolling();
+    if (was) loadSessions().catch(() => {});
+  }
 }
 
 function startPolling(ms) {
@@ -556,7 +566,7 @@ function handleEvent(type, p) {
       const i = state.sessions.findIndex((s) => s.id === info.id);
       if (i >= 0) state.sessions[i] = info; else state.sessions.unshift(info);
       state.sessions.sort((a, b) => ((b.time && b.time.updated) || 0) - ((a.time && a.time.updated) || 0));
-      if (info.id === state.currentId) titleEl.textContent = info.title || 'Chat';
+      if (info.id === state.currentId) titleEl.textContent = displayTitle(info);
       renderSessions();
       break;
     }
