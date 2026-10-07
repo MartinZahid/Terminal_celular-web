@@ -34,6 +34,35 @@ function authed(req: IncomingMessage): boolean {
   }
 }
 
+// Allowlist: el navegador solo puede alcanzar los endpoints que la app usa.
+// Cualquier otra ruta de la API de opencode queda bloqueada (403).
+function allowedPath(targetPath: string): boolean {
+  const p = targetPath.split('?')[0]
+  if (p === '/agent' || p === '/event' || p === '/config/providers') return true
+  if (p === '/session' || p.startsWith('/session/')) return true
+  return false
+}
+
+// Quita credenciales (API keys) antes de devolver JSON al navegador.
+function sanitize(obj: unknown): void {
+  const scrub = (o: Record<string, unknown>): void => {
+    for (const k of ['key', 'apiKey', 'api_key', 'token', 'password', 'secret']) {
+      if (k in o) delete o[k]
+    }
+  }
+  if (Array.isArray(obj)) {
+    for (const p of obj) if (p && typeof p === 'object') scrub(p as Record<string, unknown>)
+  } else if (obj && typeof obj === 'object') {
+    const o = obj as Record<string, unknown>
+    if (Array.isArray(o.providers)) {
+      for (const p of o.providers) if (p && typeof p === 'object') scrub(p as Record<string, unknown>)
+    }
+    if (Array.isArray(o.all)) {
+      for (const p of o.all) if (p && typeof p === 'object') scrub(p as Record<string, unknown>)
+    }
+  }
+}
+
 function serveApp(res: ServerResponse, urlPath: string): void {
   let rel = urlPath.replace(/^\/app\/?/, '')
   if (rel === '') rel = 'index.html'
@@ -68,15 +97,13 @@ function proxy(req: IncomingMessage, res: ServerResponse, targetPath: string): v
         outHeaders['cache-control'] = 'no-cache'
         outHeaders['x-accel-buffering'] = 'no'
       }
-      if (targetPath.split('?')[0] === '/config/providers' && ct.includes('application/json')) {
+      if (ct.includes('application/json')) {
         const chunks: Buffer[] = []
         pres.on('data', (c) => chunks.push(c as Buffer))
         pres.on('end', () => {
           try {
             const data = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-            for (const p of (data.providers || [])) {
-              if (p && typeof p === 'object') delete p.key
-            }
+            sanitize(data)
             const body = Buffer.from(JSON.stringify(data))
             outHeaders['content-length'] = String(body.length)
             res.writeHead(pres.statusCode || 200, outHeaders)
@@ -117,6 +144,11 @@ export function handleAppRequest(req: IncomingMessage, res: ServerResponse, url:
       return true
     }
     const rest = path.replace(/^\/oc/, '') + (url.search || '')
+    if (!allowedPath(rest)) {
+      res.writeHead(403, { 'content-type': 'application/json' })
+      res.end('{"error":"forbidden"}')
+      return true
+    }
     proxy(req, res, rest || '/')
     return true
   }
