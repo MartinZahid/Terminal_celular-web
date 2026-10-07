@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE = 'tc-v1';
+const CACHE = 'tc-v2';
 const SHELL = [
   '/app',
   '/app/app.css',
@@ -27,8 +27,11 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(e.request)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy));
+          // Solo cachear respuestas válidas propias (no redirects a /auth/login ni errores).
+          if (res.ok && res.status === 200 && !res.redirected) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(e.request, copy));
+          }
           return res;
         })
         .catch(() => caches.match(e.request).then((r) => r || caches.match('/app')))
