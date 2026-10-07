@@ -6,24 +6,40 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WTS_DIR="${WTS_DIR:-/home/martin/Whatsapp-teamSync}"
 COFFE_DIR="${COFFE_DIR:-/home/martin/coffecode-web}"
 OC_PORT="${OC_PORT:-4096}"
+APP_DIR="${APP_DIR:-$REPO_DIR/app}"
 
-echo "==> 1/5  Servicio systemd --user de opencode"
+echo "==> 1/6  Servicio systemd --user de opencode"
 mkdir -p "$HOME/.config/systemd/user"
 cp "$REPO_DIR/deploy/opencode-serve.service" "$HOME/.config/systemd/user/opencode-serve.service"
 systemctl --user daemon-reload
 systemctl --user enable --now opencode-serve.service
 systemctl --user restart opencode-serve.service
 
-echo "==> 2/5  Copiar módulo de integración al server WTS"
+echo "==> 2/6  Copiar módulo de integración al server WTS"
 cp "$REPO_DIR/server/opencode-app.ts" "$WTS_DIR/server/src/opencode-app.ts"
 
-echo "==> 3/5  Aplicar enganches (idempotente)"
+echo "==> 3/6  Aplicar enganches (idempotente)"
 python3 "$REPO_DIR/deploy/patch.py" "$WTS_DIR" "$COFFE_DIR"
 
-echo "==> 4/5  Recompilar server WTS"
+echo "==> 4/6  Configurar APP_DIR en la unidad de WTS"
+UNIT="$HOME/.config/systemd/user/whatsapp-teamsync.service"
+if [ -f "$UNIT" ]; then
+  if grep -q '^Environment=APP_DIR=' "$UNIT"; then
+    sed -i "s#^Environment=APP_DIR=.*#Environment=APP_DIR=$APP_DIR#" "$UNIT"
+  else
+    awk -v appdir="$APP_DIR" '{ print } /^\[Service\]$/ { print "Environment=APP_DIR=" appdir }' "$UNIT" > "$UNIT.tmp"
+    mv "$UNIT.tmp" "$UNIT"
+  fi
+  systemctl --user daemon-reload
+  echo "  APP_DIR=$APP_DIR en whatsapp-teamsync.service"
+else
+  echo "  AVISO: no existe $UNIT; define APP_DIR=$APP_DIR manualmente en el servicio"
+fi
+
+echo "==> 5/6  Recompilar server WTS"
 ( cd "$WTS_DIR" && npm run build:server )
 
-echo "==> 5/5  Reiniciar servidores"
+echo "==> 6/6  Reiniciar servidores"
 systemctl --user restart whatsapp-teamsync.service
 # coffecode-web es un servicio de sistema con Restart=always; matar el proceso
 # hace que systemd lo relance con el código nuevo, sin necesitar sudo.
