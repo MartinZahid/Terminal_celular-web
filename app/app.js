@@ -15,6 +15,7 @@ const state = {
   busy: false,
 };
 let es = null;
+let busyWatch = null;
 
 const chatEl = $('chat');
 const inputEl = $('input');
@@ -372,6 +373,22 @@ function setBusy(b) {
   state.busy = b;
   sendBtn.hidden = b;
   stopBtn.hidden = !b;
+  if (busyWatch) { clearTimeout(busyWatch); busyWatch = null; }
+  if (b) busyWatch = setTimeout(checkBusy, 15000);
+}
+
+async function checkBusy() {
+  busyWatch = null;
+  if (!state.busy || !state.currentId) return;
+  try {
+    const r = await fetch(API + '/session/status');
+    if (r.ok) {
+      const s = await r.json();
+      const st = s[state.currentId];
+      if (!st || st.type === 'idle') { setBusy(false); return; }
+    }
+  } catch {}
+  if (state.busy) busyWatch = setTimeout(checkBusy, 15000);
 }
 
 async function send() {
@@ -493,8 +510,18 @@ function handleEvent(type, p) {
 
 function connectEvents() {
   if (es) es.close();
+  let firstOpen = true;
   es = new EventSource(API + '/event');
-  es.onopen = () => { connEl.className = 'dot on'; };
+  es.onopen = async () => {
+    connEl.className = 'dot on';
+    if (firstOpen) { firstOpen = false; return; }
+    try {
+      const me = await (await fetch('/auth/me')).json();
+      if (!me.authenticated) { location.href = '/auth/login'; return; }
+    } catch { return; }
+    await loadSessions().catch(() => {});
+    if (state.currentId) await loadMessages(state.currentId).catch(() => {});
+  };
   es.onerror = () => { connEl.className = 'dot off'; };
   es.onmessage = (e) => {
     let ev;
