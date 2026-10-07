@@ -96,12 +96,25 @@ function ensureMessage(info) {
   } else {
     const textEl = h('div', 'text');
     const partsWrap = h('div', 'parts');
+    const errEl = h('div', 'err');
+    errEl.hidden = true;
     root.appendChild(textEl);
     root.appendChild(partsWrap);
-    m = { root, textEl, partsWrap, parts: new Map(), role: 'assistant', raw: '' };
+    root.appendChild(errEl);
+    m = { root, textEl, partsWrap, errEl, parts: new Map(), role: 'assistant', raw: '' };
   }
   msgEls.set(info.id, m);
   chatEl.appendChild(root);
+  return m;
+}
+
+function applyInfo(info) {
+  const m = ensureMessage(info);
+  if (m && m.role === 'assistant' && info.error) {
+    const msg = (info.error.data && info.error.data.message) || info.error.name || 'Error del modelo';
+    m.errEl.textContent = msg;
+    m.errEl.hidden = false;
+  }
   return m;
 }
 
@@ -187,7 +200,7 @@ async function loadMessages(id) {
     list = await r.json();
   } catch { return; }
   for (const item of list) {
-    ensureMessage(item.info);
+    applyInfo(item.info);
     for (const p of (item.parts || [])) upsertPart(p);
   }
   scrollBottom(true);
@@ -427,7 +440,7 @@ function handleEvent(type, p) {
     case 'message.updated': {
       const info = p.info;
       if (!info || info.sessionID !== state.currentId) break;
-      ensureMessage(info);
+      applyInfo(info);
       if (info.role === 'assistant' && info.time && info.time.completed) setBusy(false);
       break;
     }
