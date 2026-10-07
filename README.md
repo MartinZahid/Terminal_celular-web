@@ -20,8 +20,27 @@ coffecode-web/server.js  ──proxy──>  WTS :3001  ──proxy /oc──>  
 
 - `app/`            Frontend PWA (HTML/CSS/JS sin bundler).
 - `server/`         Módulo de integración que se copia al server WTS.
-- `deploy/`         Unidades systemd.
+- `deploy/`         Unidades systemd y `smoke-test.mjs`.
 - `install.sh`      Instala el servicio de opencode y enlaza la integración.
+
+## Seguridad
+
+- El proxy `/oc` solo permite las rutas que la app usa (`/agent`, `/event`,
+  `/config/providers` y `/session*`); el resto responde `403`.
+- Las respuestas JSON se sanean antes de llegar al navegador: nunca se expone
+  `key`/`apiKey`/`token`/`password`/`secret` de los proveedores.
+- `opencode serve` escucha solo en `127.0.0.1` y la puerta de entrada es el login
+  existente de WTS (Google + PIN).
+
+## Tests
+
+```bash
+node deploy/smoke-test.mjs
+```
+
+Levanta un proxy efímero in-process (comparte el almacén de sesiones) y verifica
+auth, allowlist, saneo de credenciales, CRUD de sesiones y SSE real contra
+`opencode`.
 
 ## Requisitos
 
