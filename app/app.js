@@ -8,7 +8,7 @@ const state = {
   sessions: [],
   currentId: null,
   agents: [],
-  agent: localStorage.getItem('agent') || 'build',
+  agent: localStorage.getItem('agent') || 'movil',
   model: null,
   models: [],
   perms: new Map(),
@@ -16,6 +16,7 @@ const state = {
 };
 let es = null;
 let busyWatch = null;
+let pollTimer = null;
 
 const chatEl = $('chat');
 const inputEl = $('input');
@@ -207,6 +208,26 @@ async function loadMessages(id) {
   scrollBottom(true);
 }
 
+async function mergeMessages(id) {
+  let list;
+  try {
+    const r = await fetch(API + '/session/' + id + '/message?limit=200');
+    if (!r.ok) return;
+    list = await r.json();
+  } catch { return; }
+  const seen = new Set();
+  for (const item of list) {
+    if (!item || !item.info) continue;
+    applyInfo(item.info);
+    seen.add(item.info.id);
+    for (const p of (item.parts || [])) upsertPart(p);
+  }
+  for (const key of [...msgEls.keys()]) {
+    if (!seen.has(key)) { const m = msgEls.get(key); if (m) m.root.remove(); msgEls.delete(key); }
+  }
+  scrollBottom();
+}
+
 function renderSessions() {
   sessionListEl.innerHTML = '';
   for (const s of state.sessions) {
@@ -237,6 +258,7 @@ async function selectSession(id) {
   titleEl.textContent = (s && s.title) || 'Chat';
   renderSessions();
   await loadMessages(id);
+  refreshStatus();
 }
 
 async function newSession() {
@@ -300,8 +322,8 @@ async function loadAgents() {
   state.agents = all.filter((a) => a.mode === 'primary' || a.mode === 'all');
   if (!state.agents.length) state.agents = all;
   if (!state.agents.find((a) => a.name === state.agent)) {
-    const b = state.agents.find((a) => a.name === 'build');
-    state.agent = (b && b.name) || (state.agents[0] && state.agents[0].name) || 'build';
+    const b = state.agents.find((a) => a.name === 'movil') || state.agents.find((a) => a.name === 'build');
+    state.agent = (b && b.name) || (state.agents[0] && state.agents[0].name) || 'movil';
   }
   renderAgents();
 }
@@ -374,7 +396,49 @@ function setBusy(b) {
   sendBtn.hidden = b;
   stopBtn.hidden = !b;
   if (busyWatch) { clearTimeout(busyWatch); busyWatch = null; }
-  if (b) busyWatch = setTimeout(checkBusy, 15000);
+  if (b) { busyWatch = setTimeout(checkBusy, 15000); startPolling(1000); }
+  else stopPolling();
+}
+
+function startPolling(ms) {
+  if (pollTimer) return;
+  pollTimer = setInterval(pollOnce, ms);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function pollOnce() {
+  if (!state.currentId) return;
+  await mergeMessages(state.currentId).catch(() => {});
+  try {
+    const r = await fetch(API + '/session/status');
+    if (r.ok) {
+      const s = await r.json();
+      const st = s[state.currentId];
+      if (!st || st.type === 'idle') setBusy(false);
+    }
+  } catch {}
+}
+
+async function refreshStatus() {
+  if (!state.currentId) return;
+  try {
+    const r = await fetch(API + '/session/status');
+    if (r.ok) {
+      const s = await r.json();
+      const st = s[state.currentId];
+      setBusy(!!(st && st.type === 'busy'));
+    }
+  } catch {}
+}
+
+function resync() {
+  if (document.hidden) return;
+  connectEvents();
+  if (state.currentId) mergeMessages(state.currentId).catch(() => {});
+  pollOnce();
 }
 
 async function checkBusy() {
@@ -589,6 +653,11 @@ $('sheet-model').onclick = (e) => { if (e.target.id === 'sheet-model') $('sheet-
 $('sheet-perm').onclick = (e) => { if (e.target.id === 'sheet-perm') $('sheet-perm').hidden = true; };
 inputEl.addEventListener('input', autosize);
 inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden) resync(); });
+window.addEventListener('pageshow', () => resync());
+window.addEventListener('focus', () => resync());
+window.addEventListener('online', () => resync());
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/app/sw.js').catch(() => {});
 

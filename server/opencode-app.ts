@@ -63,6 +63,40 @@ function sanitize(obj: unknown): void {
   }
 }
 
+// Suscripción SSE persistente: mantiene un cliente conectado al stream de
+// opencode para que nunca vea "0 clientes" cuando el teléfono se desconecta.
+// Evita que un turno se aborte por client_disconnect. Desactivable con OC_KEEPALIVE=0.
+const KEEPALIVE = process.env.OC_KEEPALIVE !== '0'
+let persistent: http.ClientRequest | null = null
+let persistentStopped = false
+
+function ensurePersistent(): void {
+  if (!KEEPALIVE || persistentStopped || persistent) return
+  const preq = http.request(
+    { host: OC_HOST, port: OC_PORT, path: '/event', method: 'GET', headers: { accept: 'text/event-stream' } },
+    (pres) => {
+      pres.on('data', () => {})
+      pres.on('end', () => { persistent = null; if (!persistentStopped) setTimeout(ensurePersistent, 2000) })
+      pres.on('error', () => { persistent = null })
+    }
+  )
+  preq.on('socket', (s) => { try { s.unref() } catch {} })
+  preq.on('error', () => { persistent = null; if (!persistentStopped) setTimeout(ensurePersistent, 2000) })
+  preq.end()
+  persistent = preq
+}
+
+ensurePersistent()
+
+// Cierra la suscripción persistente para que el proceso pueda salir limpio.
+export function stopPersistent(): void {
+  persistentStopped = true
+  if (persistent) {
+    try { persistent.destroy() } catch {}
+    persistent = null
+  }
+}
+
 function serveApp(res: ServerResponse, urlPath: string): void {
   let rel = urlPath.replace(/^\/app\/?/, '')
   if (rel === '') rel = 'index.html'
@@ -124,6 +158,9 @@ function proxy(req: IncomingMessage, res: ServerResponse, targetPath: string): v
     if (!res.headersSent) res.writeHead(502)
     res.end('proxy error')
   })
+  // Cierre limpio: si el cliente se va, corta el upstream (evita fugas y el
+  // "Unexpected EOF" del server). La suscripción persistente sigue viva.
+  res.on('close', () => { if (!preq.destroyed) preq.destroy() })
   req.pipe(preq)
 }
 
