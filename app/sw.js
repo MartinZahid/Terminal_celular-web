@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE = 'tc-v3';
+const CACHE = 'tc-v4';
 const SHELL = [
   '/app',
   '/app/app.css',
@@ -25,7 +25,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || url.pathname.startsWith('/oc') || url.pathname.startsWith('/auth')) return;
   if (url.pathname === '/app' || url.pathname.startsWith('/app/')) {
     e.respondWith(
-      fetch(e.request)
+      fetch(e.request, { cache: 'no-store' })
         .then((res) => {
           // Solo cachear respuestas válidas propias (no redirects a /auth/login ni errores).
           if (res.ok && res.status === 200 && !res.redirected) {

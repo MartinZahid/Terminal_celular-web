@@ -669,6 +669,17 @@ window.addEventListener('pageshow', () => resync());
 window.addEventListener('focus', () => resync());
 window.addEventListener('online', () => resync());
 
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/app/sw.js').catch(() => {});
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker
+    .register('/app/sw.js', { updateViaCache: 'none' })
+    .then((reg) => { reg.update().catch(() => {}); })
+    .catch(() => {});
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+}
 
 boot();

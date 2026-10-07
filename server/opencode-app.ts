@@ -105,7 +105,7 @@ function serveApp(res: ServerResponse, urlPath: string): void {
   if (!full.startsWith(APP_DIR) || !existsSync(full)) {
     const idx = join(APP_DIR, 'index.html')
     if (existsSync(idx)) {
-      res.writeHead(200, { 'content-type': MIME['.html'] })
+      res.writeHead(200, { 'content-type': MIME['.html'], 'cache-control': 'no-store' })
       res.end(readFileSync(idx))
       return
     }
@@ -114,7 +114,7 @@ function serveApp(res: ServerResponse, urlPath: string): void {
     return
   }
   const type = MIME[extname(full).toLowerCase()] || 'application/octet-stream'
-  res.writeHead(200, { 'content-type': type, 'cache-control': 'no-cache' })
+  res.writeHead(200, { 'content-type': type, 'cache-control': 'no-store' })
   res.end(readFileSync(full))
 }
 
