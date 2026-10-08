@@ -40,18 +40,30 @@ function authed(req: IncomingMessage): boolean {
   }
 }
 
-// CSRF: en métodos mutantes, si el navegador manda Origin/Referer, debe
-// coincidir con el host. (Los navegadores siempre lo mandan en cross-site.)
+// CSRF: en métodos mutantes, si el navegador manda Origin/Referer, debe ser
+// del mismo sitio. Detrás del proxy (coffecode-web) el Host interno no coincide
+// con el del navegador, así que también aceptamos x-forwarded-host, el host del
+// Referer y una allowlist por env (ALLOWED_ORIGINS).
 function sameOriginOk(req: IncomingMessage): boolean {
-  const m = req.method || 'GET'
+  const m = String(req.method || 'GET').toUpperCase()
   if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return true
   const origin = req.headers.origin || req.headers.referer
   if (!origin) return true
+  let oh: string
   try {
-    return new URL(String(origin)).host === req.headers.host
+    oh = new URL(String(origin)).host
   } catch {
     return false
   }
+  const host = String(req.headers.host || '')
+  if (oh === host) return true
+  const fwd = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim()
+  if (fwd && oh === fwd) return true
+  const allowed = String(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return allowed.includes(oh)
 }
 
 // Allowlist estricta: el navegador solo alcanza los endpoints que la app usa.

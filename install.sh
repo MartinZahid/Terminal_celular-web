@@ -46,6 +46,7 @@ python3 "$REPO_DIR/deploy/patch.py" "$WTS_DIR" "$COFFE_DIR"
 echo "==> 5/7  Configurar WTS (APP_DIR + OC_PASSWORD)"
 set_env "$USER_UNIT_DIR/whatsapp-teamsync.service" APP_DIR "$APP_DIR"
 set_env "$USER_UNIT_DIR/whatsapp-teamsync.service" OC_PASSWORD "$OC_PW"
+set_env "$USER_UNIT_DIR/whatsapp-teamsync.service" ALLOWED_ORIGINS "coffecode.lat"
 systemctl --user daemon-reload
 
 echo "==> 6/7  Recompilar server WTS"

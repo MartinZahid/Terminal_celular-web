@@ -27,6 +27,7 @@ const FRONT = process.env.FRONT || 'http://127.0.0.1:8080'
 
 process.env.DB_PATH = process.env.DB_PATH || WTS_DIR + '/server/data/metrics.db'
 process.env.APP_DIR = process.env.APP_DIR || '/home/martin/terminal-celular/app'
+process.env.ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS || 'coffecode.lat'
 if (!process.env.OC_PASSWORD) {
   try {
     process.env.OC_PASSWORD = readFileSync((process.env.HOME || '') + '/.config/terminal-celular/oc-password', 'utf8').trim()
@@ -116,6 +117,14 @@ try {
   check('/oc/question -> 200', qr.status === 200, 'status ' + qr.status)
   const prq = await req('/oc/permission', { headers: { cookie } })
   check('/oc/permission -> 200', prq.status === 200, 'status ' + prq.status)
+
+  // CSRF: POST con Origin del sitio permitido pasa; cross-site se rechaza
+  const csrfOk = await req('/oc/session', { method: 'POST', headers: { cookie, 'content-type': 'application/json', origin: 'https://coffecode.lat' }, body: JSON.stringify({ title: 'csrf-ok' }) })
+  check('POST con Origin del sitio -> no 403', csrfOk.status !== 403, 'status ' + csrfOk.status)
+  const csrfOkId = (await csrfOk.json().catch(() => ({}))).id
+  if (csrfOkId) await req('/oc/session/' + csrfOkId, { method: 'DELETE', headers: { cookie } })
+  const csrfBad = await req('/oc/session', { method: 'POST', headers: { cookie, 'content-type': 'application/json', origin: 'https://evil.example' }, body: JSON.stringify({ title: 'csrf-bad' }) })
+  check('POST cross-site -> 403', csrfBad.status === 403, 'status ' + csrfBad.status)
 
   // CRUD de sesiones
   const created = await req('/oc/session', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ title: 'smoke-test' }) })
