@@ -326,4 +326,7 @@ details pre {
 .qopt.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--bg2)); }
 .qcustom { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg2); color: var(--fg); font-size: 14px; margin: 8px 0; }
 
+.inline-reqs { border: 1px solid var(--accent); border-radius: 14px; padding: 10px 12px; margin: 10px 0; background: color-mix(in srgb, var(--accent) 8%, var(--bg2)); }
+.inline-req-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--accent); margin-bottom: 8px; }
+
 [hidden] { display: none !important; }

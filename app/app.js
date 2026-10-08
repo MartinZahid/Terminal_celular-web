@@ -269,6 +269,7 @@ async function selectSession(id) {
   renderSessions();
   await loadMessages(id);
   refreshStatus();
+  renderRequests();
 }
 
 async function newSession() {
@@ -432,6 +433,7 @@ async function pollTick() {
     await pollRequests();
     if (state.currentId) {
       await mergeMessages(state.currentId).catch(() => {});
+      renderRequests();
       await refreshStatus();
     }
   } catch {}
@@ -514,14 +516,7 @@ async function abort() {
   setBusy(false);
 }
 
-function renderRequests() {
-  const list = $('perm-list');
-  list.innerHTML = '';
-  const cur = state.currentId;
-  const perms = [...state.perms.values()].filter((p) => !p.sessionID || p.sessionID === cur);
-  const questions = [...state.questions.values()].filter((q) => !q.sessionID || q.sessionID === cur);
-  if (!perms.length && !questions.length) { $('sheet-perm').hidden = true; return; }
-
+function buildRequestCards(container, perms, questions, cur) {
   for (const p of perms) {
     const card = h('div', 'perm');
     card.appendChild(h('div', 'ptitle', p.title || p.permission || p.type || 'Permiso'));
@@ -536,7 +531,7 @@ function renderRequests() {
     reject.onclick = () => replyPerm(p.id, p.sessionID || cur, 'reject');
     acts.append(once, always, reject);
     card.appendChild(acts);
-    list.appendChild(card);
+    container.appendChild(card);
   }
 
   for (const req of questions) {
@@ -578,9 +573,35 @@ function renderRequests() {
     reject.onclick = () => rejectQuestion(req.id, req.sessionID || cur);
     acts.append(answer, reject);
     card.appendChild(acts);
-    list.appendChild(card);
+    container.appendChild(card);
   }
-  if (!requestsDismissed) $('sheet-perm').hidden = false;
+}
+
+function renderRequests() {
+  const cur = state.currentId;
+  const perms = [...state.perms.values()].filter((p) => !p.sessionID || p.sessionID === cur);
+  const questions = [...state.questions.values()].filter((q) => !q.sessionID || q.sessionID === cur);
+
+  const list = $('perm-list');
+  list.innerHTML = '';
+  buildRequestCards(list, perms, questions, cur);
+  const any = perms.length || questions.length;
+  if (any && !requestsDismissed) $('sheet-perm').hidden = false;
+  if (!any) $('sheet-perm').hidden = true;
+
+  renderInline(perms, questions, cur);
+}
+
+function renderInline(perms, questions, cur) {
+  const prev = document.getElementById('inline-reqs');
+  if (prev) prev.remove();
+  if (!cur || (!perms.length && !questions.length)) return;
+  const box = h('div', 'inline-reqs');
+  box.id = 'inline-reqs';
+  box.appendChild(h('div', 'inline-req-title', 'Esperando tu respuesta'));
+  buildRequestCards(box, perms, questions, cur);
+  chatEl.appendChild(box);
+  scrollBottom();
 }
 
 async function replyPerm(id, sessionId, reply) {
