@@ -93,6 +93,7 @@ function allowedPath(targetPath: string): boolean {
   if (p.includes('..') || p.includes('\\')) return false
   if (p === '/agent' || p === '/event' || p === '/config/providers') return true
   if (p === '/question' || p === '/permission') return true
+  if (/^\/api\/session\/[^/]+\/question\/[^/]+\/(reply|reject)$/.test(p)) return true
   const SESSION_RE = /^\/session(\/status|\/[^/]+(\/(message|prompt_async|abort))?|\/[^/]+\/question(\/[^/]+\/(reply|reject))?|\/[^/]+\/permissions\/[^/]+)?$/
   return SESSION_RE.test(p)
 }

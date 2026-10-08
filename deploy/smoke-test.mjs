@@ -117,6 +117,8 @@ try {
   check('/oc/question -> 200', qr.status === 200, 'status ' + qr.status)
   const prq = await req('/oc/permission', { headers: { cookie } })
   check('/oc/permission -> 200', prq.status === 200, 'status ' + prq.status)
+  const qrep = await req('/oc/api/session/x/question/que_x/reply', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: '{"answers":[["x"]]}' })
+  check('/oc/api/.../question/reply permitido (no 403)', qrep.status !== 403, 'status ' + qrep.status)
 
   // CSRF: POST con Origin del sitio permitido pasa; cross-site se rechaza
   const csrfOk = await req('/oc/session', { method: 'POST', headers: { cookie, 'content-type': 'application/json', origin: 'https://coffecode.lat' }, body: JSON.stringify({ title: 'csrf-ok' }) })

@@ -637,7 +637,7 @@ async function answerQuestion(id, sessionId, answers) {
   if (!sid) return;
   let ok = false;
   try {
-    const r = await fetch(API + '/session/' + sid + '/question/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers }) });
+    const r = await fetch(API + '/api/session/' + sid + '/question/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers }) });
     ok = r.ok;
   } catch {}
   if (!ok) { toast('No se pudo enviar la respuesta'); return; }
@@ -650,7 +650,7 @@ async function rejectQuestion(id, sessionId) {
   if (!sid) return;
   let ok = false;
   try {
-    const r = await fetch(API + '/session/' + sid + '/question/' + id + '/reject', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
+    const r = await fetch(API + '/api/session/' + sid + '/question/' + id + '/reject', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
     ok = r.ok;
   } catch {}
   if (!ok) { toast('No se pudo rechazar'); return; }
