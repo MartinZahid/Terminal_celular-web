@@ -6,7 +6,7 @@ import { getSession, getSessionToken, clientIp, clientUa, pinConfigured, isTermi
 
 const OC_HOST = process.env.OC_HOST || '127.0.0.1'
 const OC_PORT = Number(process.env.OC_PORT || 4096)
-const APP_DIR = process.env.APP_DIR || '/home/martin/terminal-celular/app'
+const APP_DIR = process.env.APP_DIR || join(process.env.HOME || '.', 'terminal-celular', 'app')
 const OC_PASSWORD = process.env.OC_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ''
 
 const MIME: Record<string, string> = {
@@ -93,6 +93,7 @@ function allowedPath(targetPath: string): boolean {
   if (p.includes('..') || p.includes('\\')) return false
   if (p === '/agent' || p === '/event' || p === '/config/providers') return true
   if (p === '/question' || p === '/permission') return true
+  if (/^\/question\/[^/]+\/(reply|reject)$/.test(p)) return true
   if (/^\/api\/session\/[^/]+\/question\/[^/]+\/(reply|reject)$/.test(p)) return true
   const SESSION_RE = /^\/session(\/status|\/[^/]+(\/(message|prompt_async|abort))?|\/[^/]+\/question(\/[^/]+\/(reply|reject))?|\/[^/]+\/permissions\/[^/]+)?$/
   return SESSION_RE.test(p)
@@ -100,9 +101,16 @@ function allowedPath(targetPath: string): boolean {
 
 // Quita credenciales (API keys) antes de devolver JSON al navegador.
 function sanitize(obj: unknown): void {
+  const SECRET = ['key', 'apiKey', 'api_key', 'token', 'password', 'secret']
   const scrub = (o: Record<string, unknown>): void => {
-    for (const k of ['key', 'apiKey', 'api_key', 'token', 'password', 'secret']) {
+    for (const k of SECRET) {
       if (k in o) delete o[k]
+    }
+    if (o.options && typeof o.options === 'object') {
+      const opt = o.options as Record<string, unknown>
+      for (const k of SECRET) {
+        if (k in opt) delete opt[k]
+      }
     }
   }
   if (Array.isArray(obj)) {

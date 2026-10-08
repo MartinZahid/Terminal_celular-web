@@ -4,8 +4,10 @@ const API = '/oc';
 
 const $ = (id) => document.getElementById(id);
 
+let started = false;
+
 function handle401(r) {
-  if (r && r.status === 401) { location.href = '/auth/login'; return true; }
+  if (r && r.status === 401 && started) { location.href = '/auth/login'; return true; }
   return false;
 }
 
@@ -205,14 +207,15 @@ let loadToken = 0;
 
 async function loadMessages(id) {
   const my = ++loadToken;
+  const fresh = () => my === loadToken && state.currentId === id;
   let list;
   try {
     const r = await fetch(API + '/session/' + id + '/message?limit=200');
     if (handle401(r)) return;
-    if (!r.ok) return;
+    if (!r.ok) { if (fresh()) { chatEl.innerHTML = ''; msgEls.clear(); } return; }
     list = await r.json();
-  } catch { return; }
-  if (my !== loadToken || state.currentId !== id) return;
+  } catch { if (fresh()) { chatEl.innerHTML = ''; msgEls.clear(); } return; }
+  if (!fresh()) return;
   chatEl.innerHTML = '';
   msgEls.clear();
   for (const item of list) {
@@ -482,7 +485,7 @@ async function refreshStatus() {
 }
 
 function resync() {
-  if (document.hidden) return;
+  if (document.hidden || !started) return;
   connectEvents();
   if (state.currentId) mergeMessages(state.currentId).catch(() => {});
   pollOnce();
@@ -637,7 +640,7 @@ async function answerQuestion(id, sessionId, answers) {
   if (!sid) return;
   let ok = false;
   try {
-    const r = await fetch(API + '/api/session/' + sid + '/question/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers }) });
+    const r = await fetch(API + '/question/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers }) });
     ok = r.ok;
   } catch {}
   if (!ok) { toast('No se pudo enviar la respuesta'); return; }
@@ -650,7 +653,7 @@ async function rejectQuestion(id, sessionId) {
   if (!sid) return;
   let ok = false;
   try {
-    const r = await fetch(API + '/api/session/' + sid + '/question/' + id + '/reject', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
+    const r = await fetch(API + '/question/' + id + '/reject', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
     ok = r.ok;
   } catch {}
   if (!ok) { toast('No se pudo rechazar'); return; }
@@ -665,16 +668,20 @@ async function pollRequests() {
       fetch(API + '/permission').then((r) => (handle401(r) ? {} : r.ok ? r.json() : null)).catch(() => null),
     ]);
     if (qr === null && pr === null) return; // fallo de red: conserva las tarjetas
-    const qs = Array.isArray(qr) ? qr : (qr && qr.data) || [];
-    const ps = Array.isArray(pr) ? pr : (pr && pr.data) || [];
-    const sig = [...ps.map((x) => 'p:' + x.id), ...qs.map((x) => 'q:' + x.id)].sort().join('|');
+    if (qr !== null) {
+      const qs = Array.isArray(qr) ? qr : (qr && qr.data) || [];
+      state.questions.clear();
+      for (const q of qs) state.questions.set(q.id, q);
+    }
+    if (pr !== null) {
+      const ps = Array.isArray(pr) ? pr : (pr && pr.data) || [];
+      state.perms.clear();
+      for (const p of ps) state.perms.set(p.id, p);
+    }
+    const sig = [...state.perms.keys()].map((x) => 'p:' + x).concat([...state.questions.keys()].map((x) => 'q:' + x)).sort().join('|');
     if (sig === requestsSig) return;
     requestsSig = sig;
     requestsDismissed = false;
-    state.questions.clear();
-    for (const q of qs) state.questions.set(q.id, q);
-    state.perms.clear();
-    for (const p of ps) state.perms.set(p.id, p);
     renderRequests();
   } catch {}
 }
@@ -786,6 +793,7 @@ function showPin() {
 }
 
 async function start() {
+  started = true;
   $('pin-screen').hidden = true;
   connectEvents();
   await Promise.all([loadAgents(), loadModels()]).catch(() => {});

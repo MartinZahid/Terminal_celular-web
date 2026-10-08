@@ -128,6 +128,10 @@ try {
   const csrfBad = await req('/oc/session', { method: 'POST', headers: { cookie, 'content-type': 'application/json', origin: 'https://evil.example' }, body: JSON.stringify({ title: 'csrf-bad' }) })
   check('POST cross-site -> 403', csrfBad.status === 403, 'status ' + csrfBad.status)
 
+  // La ruta de responder preguntas debe estar permitida (llega a opencode, no 403)
+  const qreplyOk = await req('/oc/question/que_nonexistent/reply', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ answers: [['x']] }) })
+  check('/oc/question/{rid}/reply permitido (no 403)', qreplyOk.status !== 403, 'status ' + qreplyOk.status)
+
   // /app solo exige sesión; /oc exige PIN verificado + terminal activa
   const token2 = auth.createSession(EMAIL, '127.0.0.1', UA)
   const cookie2 = auth.sessionCookie(token2, false).split(';')[0]

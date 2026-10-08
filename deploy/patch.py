@@ -87,13 +87,13 @@ def main():
             s,
             marker,
             marker
-            + "      urlPath.startsWith('/app') ||\n"
-            + "      urlPath.startsWith('/oc') ||\n",
+            + "      urlPath === '/app' || urlPath.startsWith('/app/') ||\n"
+            + "      urlPath === '/oc' || urlPath.startsWith('/oc/') ||\n",
             1,
         )
 
     try:
-        patch(coffecode_js, [("urlPath.startsWith('/oc')", add_proxy)])
+        patch(coffecode_js, [("urlPath === '/oc'", add_proxy)])
     except MarkerNotFound as e:
         sys.exit(f"ERROR en {coffecode_js}: {e}")
 
