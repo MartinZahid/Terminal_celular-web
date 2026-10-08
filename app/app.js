@@ -269,6 +269,7 @@ async function selectSession(id) {
   renderSessions();
   await loadMessages(id);
   refreshStatus();
+  requestsDismissed = false;
   renderRequests();
 }
 
@@ -433,7 +434,8 @@ async function pollTick() {
     await pollRequests();
     if (state.currentId) {
       await mergeMessages(state.currentId).catch(() => {});
-      renderRequests();
+      const box = document.getElementById('inline-reqs');
+      if (box) chatEl.appendChild(box);
       await refreshStatus();
     }
   } catch {}
@@ -607,9 +609,12 @@ function renderInline(perms, questions, cur) {
 async function replyPerm(id, sessionId, reply) {
   const sid = sessionId || state.currentId;
   if (!sid) return;
+  let ok = false;
   try {
-    await fetch(API + '/session/' + sid + '/permissions/' + id, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response: reply }) });
+    const r = await fetch(API + '/session/' + sid + '/permissions/' + id, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ response: reply }) });
+    ok = r.ok;
   } catch {}
+  if (!ok) { toast('No se pudo responder el permiso'); return; }
   state.perms.delete(id);
   renderRequests();
 }
@@ -617,9 +622,12 @@ async function replyPerm(id, sessionId, reply) {
 async function answerQuestion(id, sessionId, answers) {
   const sid = sessionId || state.currentId;
   if (!sid) return;
+  let ok = false;
   try {
-    await fetch(API + '/session/' + sid + '/question/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers }) });
+    const r = await fetch(API + '/session/' + sid + '/question/' + id + '/reply', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ answers }) });
+    ok = r.ok;
   } catch {}
+  if (!ok) { toast('No se pudo enviar la respuesta'); return; }
   state.questions.delete(id);
   renderRequests();
 }
@@ -627,9 +635,12 @@ async function answerQuestion(id, sessionId, answers) {
 async function rejectQuestion(id, sessionId) {
   const sid = sessionId || state.currentId;
   if (!sid) return;
+  let ok = false;
   try {
-    await fetch(API + '/session/' + sid + '/question/' + id + '/reject', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
+    const r = await fetch(API + '/session/' + sid + '/question/' + id + '/reject', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) });
+    ok = r.ok;
   } catch {}
+  if (!ok) { toast('No se pudo rechazar'); return; }
   state.questions.delete(id);
   renderRequests();
 }

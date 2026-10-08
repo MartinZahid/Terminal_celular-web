@@ -25,6 +25,19 @@ export function isMobileClient(req: IncomingMessage): boolean {
   return /android|iphone|ipad|ipod|mobile|windows phone/.test(ua)
 }
 
+// Sesión válida (para servir /app: el frontend necesita cargar para mostrar
+// las pantallas de PIN y de terminal desactivada).
+function sessionOk(req: IncomingMessage): boolean {
+  try {
+    const token = getSessionToken(req)
+    if (!token) return false
+    return !!getSession(token, clientIp(req), clientUa(req))
+  } catch {
+    return false
+  }
+}
+
+// Sesión + PIN verificado + terminal activa (para /oc).
 function authed(req: IncomingMessage): boolean {
   try {
     const token = getSessionToken(req)
@@ -68,13 +81,16 @@ function sameOriginOk(req: IncomingMessage): boolean {
 
 // Allowlist estricta: el navegador solo alcanza los endpoints que la app usa.
 function allowedPath(targetPath: string): boolean {
-  let p = targetPath.split('?')[0]
+  const raw = targetPath.split('?')[0]
+  // Rechaza el encoding del separador ANTES de decodificar (si no, es inútil).
+  if (/%2f|%2F/.test(raw)) return false
+  let p = raw
   try {
     p = decodeURIComponent(p)
   } catch {
     return false
   }
-  if (p.includes('..') || p.includes('\\') || p.includes('%2f') || p.includes('%2F')) return false
+  if (p.includes('..') || p.includes('\\')) return false
   if (p === '/agent' || p === '/event' || p === '/config/providers') return true
   if (p === '/question' || p === '/permission') return true
   const SESSION_RE = /^\/session(\/status|\/[^/]+(\/(message|prompt_async|abort))?|\/[^/]+\/question(\/[^/]+\/(reply|reject))?|\/[^/]+\/permissions\/[^/]+)?$/
@@ -107,12 +123,29 @@ function sanitize(obj: unknown): void {
 const KEEPALIVE = process.env.OC_KEEPALIVE !== '0'
 let persistent: http.ClientRequest | null = null
 let persistentStopped = false
+let persistentRetry = 2000
+
+// Cabecera de autenticación hacia opencode (Basic con OC_PASSWORD).
+function ocAuthHeaders(): http.OutgoingHttpHeaders {
+  if (!OC_PASSWORD) return {}
+  return { authorization: 'Basic ' + Buffer.from('opencode:' + OC_PASSWORD).toString('base64') }
+}
 
 function ensurePersistent(): void {
   if (!KEEPALIVE || persistentStopped || persistent) return
   const preq = http.request(
-    { host: OC_HOST, port: OC_PORT, path: '/event', method: 'GET', headers: { accept: 'text/event-stream' } },
+    { host: OC_HOST, port: OC_PORT, path: '/event', method: 'GET', headers: { accept: 'text/event-stream', ...ocAuthHeaders() } },
     (pres) => {
+      if (pres.statusCode !== 200) {
+        // Sin auth válida (401) u otro error: no mantener el stream y reintentar
+        // con backoff, para no entrar en un bucle cada 2s.
+        pres.resume()
+        persistent = null
+        persistentRetry = Math.min(persistentRetry * 2, 60000)
+        if (!persistentStopped) setTimeout(ensurePersistent, persistentRetry)
+        return
+      }
+      persistentRetry = 2000
       pres.on('data', () => {})
       pres.on('end', () => { persistent = null; if (!persistentStopped) setTimeout(ensurePersistent, 2000) })
       pres.on('error', () => { persistent = null })
@@ -161,7 +194,7 @@ function proxy(req: IncomingMessage, res: ServerResponse, targetPath: string): v
   // No filtrar credenciales del cliente ni cabeceras hop-by-hop al upstream.
   for (const h of ['cookie', 'authorization', 'accept-encoding', 'connection', 'upgrade', 'keep-alive', 'te', 'trailer', 'transfer-encoding', 'proxy-authorization', 'proxy-authenticate']) delete headers[h]
   // Autenticación propia del servidor opencode (si está configurada).
-  if (OC_PASSWORD) headers['authorization'] = 'Basic ' + Buffer.from('opencode:' + OC_PASSWORD).toString('base64')
+  Object.assign(headers, ocAuthHeaders())
   const preq = http.request(
     { host: OC_HOST, port: OC_PORT, path: targetPath, method: req.method, headers },
     (pres) => {
@@ -207,7 +240,8 @@ function proxy(req: IncomingMessage, res: ServerResponse, targetPath: string): v
 
 export function handleAppRequest(req: IncomingMessage, res: ServerResponse, url: URL, path: string): boolean {
   if (path === '/app' || path.startsWith('/app/')) {
-    if (!authed(req)) {
+    // Solo sesión válida: el frontend decide mostrar PIN / terminal desactivada.
+    if (!sessionOk(req)) {
       res.writeHead(302, { Location: '/auth/login' })
       res.end()
       return true

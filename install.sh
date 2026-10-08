@@ -8,31 +8,37 @@ COFFE_DIR="${COFFE_DIR:-/home/martin/coffecode-web}"
 OC_PORT="${OC_PORT:-4096}"
 APP_DIR="${APP_DIR:-$REPO_DIR/app}"
 USER_UNIT_DIR="$HOME/.config/systemd/user"
-PW_FILE="$HOME/.config/terminal-celular/oc-password"
+ENV_DIR="$HOME/.config/terminal-celular"
+ENV_FILE="$ENV_DIR/env"
+ENVFILE_LINE="EnvironmentFile=-%h/.config/terminal-celular/env"
 
-# Fija Environment=KEY=VALUE en una unit systemd (idempotente).
-set_env() {
-  local f="$1" k="$2" v="$3"
+# Asegura EnvironmentFile= en una unit systemd (idempotente).
+set_envfile() {
+  local f="$1"
   [ -f "$f" ] || { echo "  AVISO: no existe $f"; return; }
-  if grep -q "^Environment=$k=" "$f"; then
-    sed -i "s#^Environment=$k=.*#Environment=$k=$v#" "$f"
-  else
-    awk -v line="Environment=$k=$v" '{ print } /^\[Service\]$/ { print line }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  if ! grep -q '^EnvironmentFile=' "$f"; then
+    awk -v line="$ENVFILE_LINE" '{ print } /^\[Service\]$/ { print line }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   fi
 }
 
-echo "==> 1/7  Contraseña del server opencode"
-mkdir -p "$(dirname "$PW_FILE")"
-if [ ! -s "$PW_FILE" ]; then
-  head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 32 > "$PW_FILE"
-  chmod 600 "$PW_FILE"
+echo "==> 1/7  Contraseña y variables de entorno"
+mkdir -p "$ENV_DIR"
+if [ ! -f "$ENV_FILE" ] || ! grep -q '^OPENCODE_SERVER_PASSWORD=' "$ENV_FILE"; then
+  OC_PW="$(head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 32)"
+  umask 077
+  cat > "$ENV_FILE" <<EOF
+OC_PASSWORD=$OC_PW
+OPENCODE_SERVER_PASSWORD=$OC_PW
+ALLOWED_ORIGINS=coffecode.lat
+APP_DIR=$APP_DIR
+EOF
+  chmod 600 "$ENV_FILE"
 fi
-OC_PW="$(cat "$PW_FILE")"
 
-echo "==> 2/7  Servicio systemd --user de opencode (con contraseña)"
+echo "==> 2/7  Servicio systemd --user de opencode"
 mkdir -p "$USER_UNIT_DIR"
 cp "$REPO_DIR/deploy/opencode-serve.service" "$USER_UNIT_DIR/opencode-serve.service"
-set_env "$USER_UNIT_DIR/opencode-serve.service" OPENCODE_SERVER_PASSWORD "$OC_PW"
+set_envfile "$USER_UNIT_DIR/opencode-serve.service"
 systemctl --user daemon-reload
 systemctl --user enable --now opencode-serve.service
 systemctl --user restart opencode-serve.service
@@ -43,10 +49,8 @@ cp "$REPO_DIR/server/opencode-app.ts" "$WTS_DIR/server/src/opencode-app.ts"
 echo "==> 4/7  Aplicar enganches (idempotente)"
 python3 "$REPO_DIR/deploy/patch.py" "$WTS_DIR" "$COFFE_DIR"
 
-echo "==> 5/7  Configurar WTS (APP_DIR + OC_PASSWORD)"
-set_env "$USER_UNIT_DIR/whatsapp-teamsync.service" APP_DIR "$APP_DIR"
-set_env "$USER_UNIT_DIR/whatsapp-teamsync.service" OC_PASSWORD "$OC_PW"
-set_env "$USER_UNIT_DIR/whatsapp-teamsync.service" ALLOWED_ORIGINS "coffecode.lat"
+echo "==> 5/7  Configurar WTS (EnvironmentFile)"
+set_envfile "$USER_UNIT_DIR/whatsapp-teamsync.service"
 systemctl --user daemon-reload
 
 echo "==> 6/7  Recompilar server WTS"
@@ -67,3 +71,4 @@ fi
 echo
 echo "Listo. Abre https://coffecode.lat/app en el celular."
 echo "opencode serve escucha en 127.0.0.1:$OC_PORT (Basic auth, usuario 'opencode')."
+echo "Variables en $ENV_FILE (chmod 600)."

@@ -126,6 +126,16 @@ try {
   const csrfBad = await req('/oc/session', { method: 'POST', headers: { cookie, 'content-type': 'application/json', origin: 'https://evil.example' }, body: JSON.stringify({ title: 'csrf-bad' }) })
   check('POST cross-site -> 403', csrfBad.status === 403, 'status ' + csrfBad.status)
 
+  // /app solo exige sesión; /oc exige PIN verificado + terminal activa
+  const token2 = auth.createSession(EMAIL, '127.0.0.1', UA)
+  const cookie2 = auth.sessionCookie(token2, false).split(';')[0]
+  const app2 = await req('/app', { headers: { cookie: cookie2 }, redirect: 'manual' })
+  check('/app sin PIN verificado -> 200', app2.status === 200, 'status ' + app2.status)
+  const oc2 = await req('/oc/session', { headers: { cookie: cookie2 } })
+  const pinCfg = auth.pinConfigured()
+  check('/oc sin PIN verificado -> ' + (pinCfg ? '401' : '200'), oc2.status === (pinCfg ? 401 : 200), 'status ' + oc2.status)
+  auth.destroySession(token2)
+
   // CRUD de sesiones
   const created = await req('/oc/session', { method: 'POST', headers: { cookie, 'content-type': 'application/json' }, body: JSON.stringify({ title: 'smoke-test' }) })
   const sess = await created.json().catch(() => ({}))
