@@ -18,15 +18,15 @@
 import http from 'http'
 import { readFileSync } from 'fs'
 
-const WTS_DIR = process.env.WTS_DIR || '/home/martin/Whatsapp-teamSync'
-const EMAIL = process.env.EMAIL || 'martinzahidpro@gmail.com'
+const WTS_DIR = process.env.WTS_DIR || ((process.env.HOME || '/home/martin') + '/Whatsapp-teamSync')
+const EMAIL = process.env.EMAIL || 'user@example.com'
 const UA = 'tc-smoke'
 const OC_HOST = process.env.OC_HOST || '127.0.0.1'
 const OC_PORT = Number(process.env.OC_PORT || 4096)
 const FRONT = process.env.FRONT || 'http://127.0.0.1:8080'
 
 process.env.DB_PATH = process.env.DB_PATH || WTS_DIR + '/server/data/metrics.db'
-process.env.APP_DIR = process.env.APP_DIR || '/home/martin/terminal-celular/app'
+process.env.APP_DIR = process.env.APP_DIR || ((process.env.HOME || '/home/martin') + '/terminal-celular/app')
 process.env.ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS || 'coffecode.lat'
 if (!process.env.OC_PASSWORD) {
   try {

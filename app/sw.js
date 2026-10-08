@@ -27,8 +27,8 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(
       fetch(e.request, { cache: 'no-store' })
         .then((res) => {
-          // Solo cachear respuestas válidas propias (no redirects a /auth/login ni errores).
-          if (res.ok && res.status === 200 && !res.redirected) {
+          // Solo cachear el shell conocido (no redirects, ni errores, ni rutas inexistentes).
+          if (res.ok && res.status === 200 && !res.redirected && SHELL.includes(url.pathname)) {
             const copy = res.clone();
             caches.open(CACHE).then((c) => c.put(e.request, copy));
           }

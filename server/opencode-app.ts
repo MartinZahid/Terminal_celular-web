@@ -148,7 +148,7 @@ function ensurePersistent(): void {
       persistentRetry = 2000
       pres.on('data', () => {})
       pres.on('end', () => { persistent = null; if (!persistentStopped) setTimeout(ensurePersistent, 2000) })
-      pres.on('error', () => { persistent = null })
+      pres.on('error', () => { persistent = null; if (!persistentStopped) setTimeout(ensurePersistent, 2000) })
     }
   )
   preq.on('socket', (s) => { try { s.unref() } catch {} })

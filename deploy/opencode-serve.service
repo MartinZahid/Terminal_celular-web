@@ -4,10 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/martin
-Environment=PATH=/home/martin/.opencode/bin:/usr/local/bin:/usr/bin:/bin
-EnvironmentFile=-%h/.config/terminal-celular/env
-ExecStart=/home/martin/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096
+WorkingDirectory=%h
+Environment=PATH=%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/.config/terminal-celular/env
+ExecStart=%h/.opencode/bin/opencode serve --hostname 127.0.0.1 --port 4096
 Restart=on-failure
 RestartSec=3
 

@@ -4,6 +4,11 @@ const API = '/oc';
 
 const $ = (id) => document.getElementById(id);
 
+function handle401(r) {
+  if (r && r.status === 401) { location.href = '/auth/login'; return true; }
+  return false;
+}
+
 const state = {
   sessions: [],
   currentId: null,
@@ -196,15 +201,20 @@ function upsertPart(part) {
   }
 }
 
+let loadToken = 0;
+
 async function loadMessages(id) {
-  chatEl.innerHTML = '';
-  msgEls.clear();
+  const my = ++loadToken;
   let list;
   try {
     const r = await fetch(API + '/session/' + id + '/message?limit=200');
+    if (handle401(r)) return;
     if (!r.ok) return;
     list = await r.json();
   } catch { return; }
+  if (my !== loadToken || state.currentId !== id) return;
+  chatEl.innerHTML = '';
+  msgEls.clear();
   for (const item of list) {
     applyInfo(item.info);
     for (const p of (item.parts || [])) upsertPart(p);
@@ -216,6 +226,7 @@ async function mergeMessages(id) {
   let list;
   try {
     const r = await fetch(API + '/session/' + id + '/message?limit=200');
+    if (handle401(r)) return;
     if (!r.ok) return;
     list = await r.json();
   } catch { return; }
@@ -256,6 +267,7 @@ function renderSessions() {
 
 async function loadSessions() {
   const r = await fetch(API + '/session');
+  if (handle401(r)) return;
   if (!r.ok) return;
   state.sessions = await r.json();
   state.sessions.sort((a, b) => ((b.time && b.time.updated) || 0) - ((a.time && a.time.updated) || 0));
@@ -435,7 +447,7 @@ async function pollTick() {
     if (state.currentId) {
       await mergeMessages(state.currentId).catch(() => {});
       const box = document.getElementById('inline-reqs');
-      if (box) chatEl.appendChild(box);
+      if (box && chatEl.lastElementChild !== box) chatEl.appendChild(box);
       await refreshStatus();
     }
   } catch {}
@@ -508,6 +520,7 @@ async function send() {
   setBusy(true);
   try {
     const r = await fetch(API + '/session/' + state.currentId + '/prompt_async', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    if (handle401(r)) return;
     if (!r.ok && r.status !== 204) { toast('Error ' + r.status); setBusy(false); }
   } catch { toast('Sin conexión'); setBusy(false); }
 }
@@ -648,9 +661,10 @@ async function rejectQuestion(id, sessionId) {
 async function pollRequests() {
   try {
     const [qr, pr] = await Promise.all([
-      fetch(API + '/question').then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(API + '/permission').then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(API + '/question').then((r) => (handle401(r) ? {} : r.ok ? r.json() : null)).catch(() => null),
+      fetch(API + '/permission').then((r) => (handle401(r) ? {} : r.ok ? r.json() : null)).catch(() => null),
     ]);
+    if (qr === null && pr === null) return; // fallo de red: conserva las tarjetas
     const qs = Array.isArray(qr) ? qr : (qr && qr.data) || [];
     const ps = Array.isArray(pr) ? pr : (pr && pr.data) || [];
     const sig = [...ps.map((x) => 'p:' + x.id), ...qs.map((x) => 'q:' + x.id)].sort().join('|');
@@ -805,7 +819,7 @@ document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => { c
 $('sheet-model').onclick = (e) => { if (e.target.id === 'sheet-model') $('sheet-model').hidden = true; };
 $('sheet-perm').onclick = (e) => { if (e.target.id === 'sheet-perm') { $('sheet-perm').hidden = true; requestsDismissed = true; } };
 inputEl.addEventListener('input', autosize);
-inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } });
+inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !window.matchMedia('(pointer:coarse)').matches) { e.preventDefault(); send(); } });
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden) resync(); });
 window.addEventListener('pageshow', () => resync());
@@ -818,8 +832,9 @@ if ('serviceWorker' in navigator) {
     .then((reg) => { reg.update().catch(() => {}); })
     .catch(() => {});
   let reloaded = false;
+  const hadController = !!navigator.serviceWorker.controller;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (reloaded) return;
+    if (reloaded || !hadController) return;
     reloaded = true;
     location.reload();
   });
