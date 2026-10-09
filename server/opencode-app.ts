@@ -27,7 +27,7 @@ export function isMobileClient(req: IncomingMessage): boolean {
 
 // Sesión válida (para servir /app: el frontend necesita cargar para mostrar
 // las pantallas de PIN y de terminal desactivada).
-function sessionOk(req: IncomingMessage): boolean {
+export function sessionOk(req: IncomingMessage): boolean {
   try {
     const token = getSessionToken(req)
     if (!token) return false
@@ -38,7 +38,7 @@ function sessionOk(req: IncomingMessage): boolean {
 }
 
 // Sesión + PIN verificado + terminal activa (para /oc).
-function authed(req: IncomingMessage): boolean {
+export function authed(req: IncomingMessage): boolean {
   try {
     const token = getSessionToken(req)
     if (!token) return false
@@ -57,7 +57,7 @@ function authed(req: IncomingMessage): boolean {
 // del mismo sitio. Detrás del proxy (coffecode-web) el Host interno no coincide
 // con el del navegador, así que también aceptamos x-forwarded-host, el host del
 // Referer y una allowlist por env (ALLOWED_ORIGINS).
-function sameOriginOk(req: IncomingMessage): boolean {
+export function sameOriginOk(req: IncomingMessage): boolean {
   const m = String(req.method || 'GET').toUpperCase()
   if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return true
   const origin = req.headers.origin || req.headers.referer
@@ -80,7 +80,7 @@ function sameOriginOk(req: IncomingMessage): boolean {
 }
 
 // Allowlist estricta: el navegador solo alcanza los endpoints que la app usa.
-function allowedPath(targetPath: string): boolean {
+export function allowedPath(targetPath: string): boolean {
   const raw = targetPath.split('?')[0]
   // Rechaza el encoding del separador ANTES de decodificar (si no, es inútil).
   if (/%2f|%2F/.test(raw)) return false
@@ -100,7 +100,7 @@ function allowedPath(targetPath: string): boolean {
 
 // Quita credenciales (API keys) antes de devolver JSON al navegador.
 // Recursivo: cubre campos anidados como models[].options.apiKey.
-function sanitize(obj: unknown): void {
+export function sanitize(obj: unknown): void {
   const SECRET = ['key', 'apiKey', 'api_key', 'token', 'password', 'secret']
   const walk = (o: unknown): void => {
     if (!o || typeof o !== 'object') return
@@ -214,6 +214,10 @@ function proxy(req: IncomingMessage, res: ServerResponse, targetPath: string): v
             const data = JSON.parse(Buffer.concat(chunks).toString('utf8'))
             if (scrubJson) sanitize(data)
             const body = Buffer.from(JSON.stringify(data))
+            // El upstream puede venir en chunked; al bufferizar y fijar
+            // content-length hay que quitar transfer-encoding, si no la
+            // respuesta es inválida (HPE_INVALID_CONTENT_LENGTH).
+            delete outHeaders['transfer-encoding']
             outHeaders['content-length'] = String(body.length)
             res.writeHead(pres.statusCode || 200, outHeaders)
             res.end(body)

@@ -45,9 +45,7 @@ function h(tag, cls, text) {
 function uid() {
   return 'msg_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 }
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
+// esc/fmtTime/md/displayTitle/partKey viven en /app/pure.js (testeable).
 function toast(msg, ms = 2200) {
   const t = $('toast');
   t.textContent = msg;
@@ -55,31 +53,7 @@ function toast(msg, ms = 2200) {
   clearTimeout(t._t);
   t._t = setTimeout(() => { t.hidden = true; }, ms);
 }
-function fmtTime(ts) {
-  if (!ts) return '';
-  try {
-    return new Date(ts).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  } catch { return ''; }
-}
-function md(raw) {
-  if (!raw) return '';
-  const parts = String(raw).split(/```/);
-  let out = '';
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 1) {
-      let code = parts[i];
-      const nl = code.indexOf('\n');
-      if (nl > -1) code = code.slice(nl + 1);
-      out += '<pre class="code">' + esc(code.replace(/\n$/, '')) + '</pre>';
-    } else {
-      let t = esc(parts[i]);
-      t = t.replace(/`([^`\n]+)`/g, '<code>$1</code>');
-      t = t.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-      out += t;
-    }
-  }
-  return out;
-}
+
 function autosize() {
   inputEl.style.height = 'auto';
   inputEl.style.height = Math.min(inputEl.scrollHeight, window.innerHeight * 0.3) + 'px';
@@ -126,9 +100,7 @@ function applyInfo(info) {
   return m;
 }
 
-function partKey(part) {
-  return part.id || (part.type + ':' + (part.callID || ''));
-}
+
 
 function upsertPart(part) {
   const m = msgEls.get(part.messageID);
@@ -246,11 +218,7 @@ async function mergeMessages(id) {
   scrollBottom();
 }
 
-function displayTitle(s) {
-  const t = s && s.title ? String(s.title) : '';
-  if (!t || /^new session - /i.test(t)) return 'Nuevo chat';
-  return t;
-}
+
 
 function renderSessions() {
   sessionListEl.innerHTML = '';
