@@ -94,36 +94,25 @@ function allowedPath(targetPath: string): boolean {
   if (p === '/agent' || p === '/event' || p === '/config/providers') return true
   if (p === '/question' || p === '/permission') return true
   if (/^\/question\/[^/]+\/(reply|reject)$/.test(p)) return true
-  if (/^\/api\/session\/[^/]+\/question\/[^/]+\/(reply|reject)$/.test(p)) return true
   const SESSION_RE = /^\/session(\/status|\/[^/]+(\/(message|prompt_async|abort))?|\/[^/]+\/question(\/[^/]+\/(reply|reject))?|\/[^/]+\/permissions\/[^/]+)?$/
   return SESSION_RE.test(p)
 }
 
 // Quita credenciales (API keys) antes de devolver JSON al navegador.
+// Recursivo: cubre campos anidados como models[].options.apiKey.
 function sanitize(obj: unknown): void {
   const SECRET = ['key', 'apiKey', 'api_key', 'token', 'password', 'secret']
-  const scrub = (o: Record<string, unknown>): void => {
-    for (const k of SECRET) {
-      if (k in o) delete o[k]
+  const walk = (o: unknown): void => {
+    if (!o || typeof o !== 'object') return
+    if (Array.isArray(o)) {
+      for (const x of o) walk(x)
+      return
     }
-    if (o.options && typeof o.options === 'object') {
-      const opt = o.options as Record<string, unknown>
-      for (const k of SECRET) {
-        if (k in opt) delete opt[k]
-      }
-    }
+    const rec = o as Record<string, unknown>
+    for (const k of SECRET) if (k in rec) delete rec[k]
+    for (const k of Object.keys(rec)) walk(rec[k])
   }
-  if (Array.isArray(obj)) {
-    for (const p of obj) if (p && typeof p === 'object') scrub(p as Record<string, unknown>)
-  } else if (obj && typeof obj === 'object') {
-    const o = obj as Record<string, unknown>
-    if (Array.isArray(o.providers)) {
-      for (const p of o.providers) if (p && typeof p === 'object') scrub(p as Record<string, unknown>)
-    }
-    if (Array.isArray(o.all)) {
-      for (const p of o.all) if (p && typeof p === 'object') scrub(p as Record<string, unknown>)
-    }
-  }
+  walk(obj)
 }
 
 // Suscripción SSE persistente: mantiene un cliente conectado al stream de
@@ -214,13 +203,16 @@ function proxy(req: IncomingMessage, res: ServerResponse, targetPath: string): v
         outHeaders['cache-control'] = 'no-cache'
         outHeaders['x-accel-buffering'] = 'no'
       }
+      // Solo saneamos respuestas de proveedores (evita borrar campos legítimos
+      // como "key"/"token" dentro de mensajes/tools).
+      const scrubJson = /^\/(config\/providers|provider)(\/|$)/.test(targetPath.split('?')[0])
       if (ct.includes('application/json')) {
         const chunks: Buffer[] = []
         pres.on('data', (c) => chunks.push(c as Buffer))
         pres.on('end', () => {
           try {
             const data = JSON.parse(Buffer.concat(chunks).toString('utf8'))
-            sanitize(data)
+            if (scrubJson) sanitize(data)
             const body = Buffer.from(JSON.stringify(data))
             outHeaders['content-length'] = String(body.length)
             res.writeHead(pres.statusCode || 200, outHeaders)

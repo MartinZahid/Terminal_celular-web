@@ -5,6 +5,7 @@ Es idempotente: si el enganche ya está presente, no lo vuelve a insertar.
 Falla con error si un marcador esperado no existe (para no dar "ok" en falso).
 Uso: patch.py <WTS_DIR> <COFFE_DIR>
 """
+import re
 import sys
 import pathlib
 
@@ -23,7 +24,7 @@ def patch(path: pathlib.Path, steps):
     src = path.read_text()
     original = src
     for check, apply in steps:
-        if check in src:
+        if check and check in src:
             continue
         src = apply(src)
     if src != original:
@@ -81,19 +82,28 @@ def main():
 
     coffecode_js = coffe_dir / "server.js"
 
-    def add_proxy(s):
+    # Elimina cualquier variante previa de las líneas /app y /oc (amplia o
+    # exacta, incluso duplicadas) y deja UNA pareja canónica. Idempotente.
+    def normalize_proxy(s):
+        for pat in (
+            r"^ *urlPath === '/app' \|\| urlPath\.startsWith\('/app/'\) \|\|\n",
+            r"^ *urlPath === '/oc' \|\| urlPath\.startsWith\('/oc/'\) \|\|\n",
+            r"^ *urlPath\.startsWith\('/app'\) \|\|\n",
+            r"^ *urlPath\.startsWith\('/oc'\) \|\|\n",
+        ):
+            s = re.sub(pat, "", s, flags=re.M)
         marker = "      urlPath.startsWith('/gastometro') ||\n"
-        return must_replace(
-            s,
-            marker,
-            marker
-            + "      urlPath === '/app' || urlPath.startsWith('/app/') ||\n"
-            + "      urlPath === '/oc' || urlPath.startsWith('/oc/') ||\n",
-            1,
+        if marker not in s:
+            raise MarkerNotFound("no se encontró el marcador de gastometro en coffecode server.js")
+        canonical = (
+            "      urlPath === '/app' || urlPath.startsWith('/app/') ||\n"
+            "      urlPath === '/oc' || urlPath.startsWith('/oc/') ||\n"
         )
+        return s.replace(marker, marker + canonical, 1)
 
     try:
-        patch(coffecode_js, [("urlPath === '/oc'", add_proxy)])
+        # check vacío → siempre se ejecuta (normalize_proxy ya es idempotente).
+        patch(coffecode_js, [("", normalize_proxy)])
     except MarkerNotFound as e:
         sys.exit(f"ERROR en {coffecode_js}: {e}")
 

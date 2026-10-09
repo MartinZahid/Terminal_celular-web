@@ -27,7 +27,7 @@ set_kv() {
   local f="$1" k="$2" v="$3"
   touch "$f"
   if grep -q "^$k=" "$f"; then
-    awk -v k="$k" -v v="$v" 'BEGIN{FS=OFS="="} $1==k {print k"="v; next} {print}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    K="$k" V="$v" awk 'BEGIN{k=ENVIRON["K"]; v=ENVIRON["V"]} index($0, k"=")==1 {print k"="v; next} {print}' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   else
     printf '%s=%s\n' "$k" "$v" >> "$f"
   fi
