@@ -1,10 +1,11 @@
 'use strict';
 
-const CACHE = 'tc-v4';
+const CACHE = 'tc-v5';
 const SHELL = [
   '/app',
   '/app/app.css',
   '/app/app.js',
+  '/app/pure.js',
   '/app/manifest.webmanifest',
   '/app/icons/icon-192.png',
   '/app/icons/icon-512.png'

@@ -8,6 +8,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+// Sin opencode no arrancar el keepalive (colgaría el test); sin heredar la
+// allowlist de producción (haría el test no determinista).
+process.env.OC_KEEPALIVE = '0'
+delete process.env.ALLOWED_ORIGINS
+
 const WTS = process.env.WTS_DIR || path.join(os.homedir(), 'Whatsapp-teamSync')
 const mod = await import(pathToFileURL(path.join(WTS, 'server/dist/server/src/opencode-app.js')).href)
 const { allowedPath, sameOriginOk, sanitize } = mod
@@ -54,6 +59,15 @@ test('sameOriginOk valida métodos mutantes', () => {
   assert.equal(post({ origin: 'https://coffecode.lat', host: 'localhost:3001', 'x-forwarded-host': 'coffecode.lat' }), true)
   assert.equal(post({ origin: 'https://coffecode.lat', host: 'coffecode.lat' }), true)
   assert.equal(sameOriginOk({ method: 'GET', headers: {} }), true)
+})
+
+test('sameOriginOk respeta ALLOWED_ORIGINS', () => {
+  process.env.ALLOWED_ORIGINS = 'coffecode.lat'
+  try {
+    assert.equal(sameOriginOk({ method: 'POST', headers: { origin: 'https://coffecode.lat', host: 'otro:1' } }), true)
+  } finally {
+    delete process.env.ALLOWED_ORIGINS
+  }
 })
 
 test('sanitize quita credenciales, incluso anidadas', () => {

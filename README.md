@@ -45,13 +45,17 @@ coffecode-web/server.js  ──proxy──>  WTS :3001  ──proxy /oc──>  
 
 ```bash
 node deploy/smoke-test.mjs        # integración E2E (proxy efímero + opencode real)
+node test/proxy.test.mjs          # integración del proxy vs un upstream falso
 node test/frontend.test.cjs       # funciones puras del frontend (app/pure.js)
 node --test test/server.test.mjs  # funciones puras del proxy (requiere WTS compilado)
 ```
 
 `smoke-test.mjs` levanta un proxy efímero in-process (comparte el almacén de
 sesiones) y verifica auth, allowlist, saneo de credenciales, CRUD de sesiones y
-SSE real contra `opencode`. Los otros dos son unitarios y no usan red.
+SSE real contra `opencode`. `proxy.test.mjs` ejercita `handleAppRequest` contra
+un upstream falso (Basic auth, cookie no reenviada, chunked, CSRF) sin necesidad
+de `opencode`. `server.test.mjs` y `proxy.test.mjs` importan `server/dist`, así
+que requieren el WTS compilado; `frontend.test.cjs` no.
 
 ## Requisitos
 
