@@ -44,12 +44,14 @@ coffecode-web/server.js  ──proxy──>  WTS :3001  ──proxy /oc──>  
 ## Tests
 
 ```bash
-node deploy/smoke-test.mjs
+node deploy/smoke-test.mjs        # integración E2E (proxy efímero + opencode real)
+node test/frontend.test.cjs       # funciones puras del frontend (app/pure.js)
+node --test test/server.test.mjs  # funciones puras del proxy (requiere WTS compilado)
 ```
 
-Levanta un proxy efímero in-process (comparte el almacén de sesiones) y verifica
-auth, allowlist, saneo de credenciales, CRUD de sesiones y SSE real contra
-`opencode`.
+`smoke-test.mjs` levanta un proxy efímero in-process (comparte el almacén de
+sesiones) y verifica auth, allowlist, saneo de credenciales, CRUD de sesiones y
+SSE real contra `opencode`. Los otros dos son unitarios y no usan red.
 
 ## Requisitos
 
