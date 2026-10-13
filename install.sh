@@ -42,6 +42,24 @@ fi
 set_kv "$ENV_FILE" OC_PASSWORD "$(grep '^OPENCODE_SERVER_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
 set_kv "$ENV_FILE" APP_DIR "$APP_DIR"
 set_kv "$ENV_FILE" ALLOWED_ORIGINS "${ALLOWED_ORIGINS:-coffecode.lat}"
+# Destino principal de opencode (la máquina local).
+set_kv "$ENV_FILE" OC_HOST "${OC_HOST:-127.0.0.1}"
+set_kv "$ENV_FILE" OC_PORT "$OC_PORT"
+# Destino secundario opcional (p. ej. un túnel SSH a otra máquina). Solo se
+# activa si se pasa OC2_PORT; si no, la app solo ofrece la máquina principal.
+if [ -n "${OC2_PORT:-}" ]; then
+  set_kv "$ENV_FILE" OC2_HOST "${OC2_HOST:-127.0.0.1}"
+  set_kv "$ENV_FILE" OC2_PORT "$OC2_PORT"
+  [ -n "${OC2_PASSWORD:-}" ] && set_kv "$ENV_FILE" OC2_PASSWORD "$OC2_PASSWORD"
+fi
+# Terminal PC: máquina secundaria accesible por SSH (opcional). Solo se activa
+# si se pasa TERMINAL_SSH_HOST; si no, la terminal solo ofrece la Principal.
+if [ -n "${TERMINAL_SSH_HOST:-}" ]; then
+  set_kv "$ENV_FILE" TERMINAL_SSH_HOST "$TERMINAL_SSH_HOST"
+  set_kv "$ENV_FILE" TERMINAL_SSH_USER "${TERMINAL_SSH_USER:-ubuntu}"
+  [ -n "${TERMINAL_SSH_KEY:-}" ] && set_kv "$ENV_FILE" TERMINAL_SSH_KEY "$TERMINAL_SSH_KEY"
+  [ -n "${TERMINAL_SSH_PORT:-}" ] && set_kv "$ENV_FILE" TERMINAL_SSH_PORT "$TERMINAL_SSH_PORT"
+fi
 chmod 600 "$ENV_FILE"
 # Limpieza de instalaciones previas (secretos en texto plano + archivo viejo).
 for f in "$USER_UNIT_DIR/opencode-serve.service" "$USER_UNIT_DIR/whatsapp-teamsync.service"; do

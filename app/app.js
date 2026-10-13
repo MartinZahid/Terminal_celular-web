@@ -1,6 +1,11 @@
 'use strict';
 
-const API = '/oc';
+const MACHINES = [
+  { id: 'principal', label: 'Principal', path: '/oc' },
+  { id: 'secundaria', label: 'Secundaria', path: '/oc2' },
+];
+let machine = localStorage.getItem('machine') || MACHINES[0].id;
+let API = (MACHINES.find((m) => m.id === machine) || MACHINES[0]).path;
 
 const $ = (id) => document.getElementById(id);
 
@@ -35,6 +40,10 @@ const titleEl = $('session-title');
 const sessionListEl = $('session-list');
 const agentChipsEl = $('agent-chips');
 const modelLabelEl = $('model-label');
+const machineLabelEl = $('machine-label');
+const attachBtn = $('btn-attach');
+const fileInput = $('file-input');
+const attachmentsEl = $('attachments');
 
 function h(tag, cls, text) {
   const e = document.createElement(tag);
@@ -75,8 +84,12 @@ function ensureMessage(info) {
   root.dataset.id = info.id;
   if (info.role === 'user') {
     const bubble = h('div', 'bubble');
+    const files = h('div', 'ufiles');
+    const text = h('div', 'utext');
+    bubble.appendChild(files);
+    bubble.appendChild(text);
     root.appendChild(bubble);
-    m = { root, bubble, role: 'user' };
+    m = { root, bubble, files, text, role: 'user', parts: new Map() };
   } else {
     const partsWrap = h('div', 'parts');
     const errEl = h('div', 'err');
@@ -108,7 +121,7 @@ function upsertPart(part) {
   const key = partKey(part);
   if (part.type === 'text') {
     if (m.role === 'user') {
-      m.bubble.innerHTML = md(part.text);
+      m.text.innerHTML = md(part.text);
       return;
     }
     let tel = m.parts.get(key);
@@ -118,6 +131,12 @@ function upsertPart(part) {
       m.partsWrap.appendChild(tel);
     }
     tel.innerHTML = md(part.text || '');
+    return;
+  }
+  if (part.type === 'file') {
+    const container = m.role === 'user' ? m.files : m.partsWrap;
+    let fel = m.parts.get(key);
+    if (!fel) { fel = buildFilePart(part); m.parts.set(key, fel); container.appendChild(fel); }
     return;
   }
   if (m.role !== 'assistant') return;
@@ -386,6 +405,59 @@ function openModelSheet() {
   setTimeout(() => $('model-search').focus(), 50);
 }
 
+let machineForced = false;
+
+function renderMachine() {
+  const m = MACHINES.find((x) => x.id === machine) || MACHINES[0];
+  machineLabelEl.textContent = m.label;
+}
+
+function renderMachineList() {
+  const list = $('machine-list');
+  list.innerHTML = '';
+  for (const m of MACHINES) {
+    const it = h('div', 'model-item' + (m.id === machine ? ' active' : ''), m.label);
+    it.onclick = () => pickMachine(m.id);
+    list.appendChild(it);
+  }
+  $('machine-close').hidden = machineForced;
+}
+
+function openMachineSheet(forced) {
+  machineForced = !!forced;
+  renderMachineList();
+  $('sheet-machine').hidden = false;
+}
+
+async function pickMachine(id) {
+  $('sheet-machine').hidden = true;
+  const forced = machineForced;
+  machineForced = false;
+  const m = MACHINES.find((x) => x.id === id) || MACHINES[0];
+  const changed = m.id !== machine;
+  machine = m.id;
+  API = m.path;
+  localStorage.setItem('machine', machine);
+  renderMachine();
+  if (forced) { await begin(); return; }
+  if (changed) await switchMachine();
+}
+
+async function switchMachine() {
+  if (es) { es.close(); es = null; }
+  state.sessions = [];
+  state.currentId = null;
+  state.perms.clear();
+  state.questions.clear();
+  msgEls.clear();
+  chatEl.innerHTML = '';
+  titleEl.textContent = 'Cargando…';
+  requestsSig = '';
+  requestsDismissed = false;
+  setBusy(false);
+  await begin();
+}
+
 let pollInFlight = false;
 let requestsSig = '';
 let requestsDismissed = false;
@@ -475,18 +547,88 @@ async function checkBusy() {
   if (state.busy) busyWatch = setTimeout(checkBusy, 15000);
 }
 
+const MAX_FILE = 10 * 1024 * 1024;
+let pendingFiles = [];
+
+function buildFilePart(part) {
+  if (/^image\//.test(part.mime || '') && /^data:/.test(part.url || '')) {
+    const img = h('img', 'part-img');
+    img.src = part.url;
+    img.alt = part.filename || 'imagen';
+    return img;
+  }
+  const box = h('div', 'part-file');
+  box.appendChild(h('span', 'pf-icon', '📄'));
+  box.appendChild(h('span', 'pf-name', part.filename || 'archivo'));
+  if (part.mime) box.appendChild(h('span', 'pf-mime muted', part.mime));
+  return box;
+}
+
+function readDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = () => reject(fr.error);
+    fr.readAsDataURL(file);
+  });
+}
+
+function renderAttachments() {
+  attachmentsEl.innerHTML = '';
+  attachmentsEl.hidden = pendingFiles.length === 0;
+  pendingFiles.forEach((f, i) => {
+    const chip = h('div', 'att');
+    if (/^image\//.test(f.mime)) {
+      const img = h('img');
+      img.src = f.url;
+      img.alt = f.filename;
+      chip.appendChild(img);
+    }
+    const meta = h('div', 'att-meta');
+    meta.appendChild(h('div', 'att-name', f.filename));
+    meta.appendChild(h('div', 'att-size', humanSize(f.size)));
+    chip.appendChild(meta);
+    const x = h('button', 'att-x', '×');
+    x.type = 'button';
+    x.setAttribute('aria-label', 'Quitar');
+    x.onclick = () => { pendingFiles.splice(i, 1); renderAttachments(); };
+    chip.appendChild(x);
+    attachmentsEl.appendChild(chip);
+  });
+}
+
+async function onFilesPicked(e) {
+  const files = Array.from(e.target.files || []);
+  e.target.value = '';
+  for (const file of files) {
+    if (file.size > MAX_FILE) { toast('«' + file.name + '» supera 10 MB'); continue; }
+    try {
+      const url = await readDataUrl(file);
+      pendingFiles.push({ mime: file.type || 'application/octet-stream', filename: file.name, size: file.size, url });
+    } catch { toast('No se pudo leer ' + file.name); }
+  }
+  renderAttachments();
+}
+
 async function send() {
   const text = inputEl.value.trim();
-  if (!text) return;
+  if (!text && !pendingFiles.length) return;
   if (!state.currentId) await newSession();
   if (!state.currentId) return;
+  const files = pendingFiles.slice();
   inputEl.value = '';
   autosize();
+  pendingFiles = [];
+  renderAttachments();
   const messageID = uid();
   ensureMessage({ id: messageID, sessionID: state.currentId, role: 'user', time: { created: Date.now() } });
-  upsertPart({ id: 'p_' + messageID, messageID, sessionID: state.currentId, type: 'text', text });
+  let fi = 0;
+  for (const f of files) upsertPart({ id: 'pf_' + (fi++) + '_' + messageID, messageID, sessionID: state.currentId, type: 'file', mime: f.mime, filename: f.filename, url: f.url });
+  if (text) upsertPart({ id: 'p_' + messageID, messageID, sessionID: state.currentId, type: 'text', text });
   scrollBottom(true);
-  const body = { parts: [{ type: 'text', text }], agent: state.agent, messageID };
+  const parts = files.map((f) => ({ type: 'file', mime: f.mime, filename: f.filename, url: f.url }));
+  if (text) parts.push({ type: 'text', text });
+  const body = { parts, agent: state.agent, messageID };
   if (state.model) body.model = { providerID: state.model.providerID, modelID: state.model.modelID };
   setBusy(true);
   try {
@@ -760,15 +902,21 @@ function showPin() {
   };
 }
 
-async function start() {
-  started = true;
-  $('pin-screen').hidden = true;
+async function begin() {
   connectEvents();
   await Promise.all([loadAgents(), loadModels()]).catch(() => {});
   await loadSessions().catch(() => {});
   if (state.sessions.length) await selectSession(state.sessions[0].id);
   else await newSession();
   schedulePoll(1200);
+}
+
+async function start() {
+  started = true;
+  $('pin-screen').hidden = true;
+  // La primera vez que se abre la app se pregunta qué máquina usar.
+  if (!localStorage.getItem('machine')) { openMachineSheet(true); return; }
+  await begin();
 }
 
 async function boot() {
@@ -790,11 +938,14 @@ $('btn-drawer').onclick = openDrawer;
 $('scrim').onclick = closeDrawer;
 titleEl.onclick = renameSession;
 $('btn-model').onclick = openModelSheet;
+$('btn-machine').onclick = () => openMachineSheet(false);
 $('model-search').oninput = (e) => renderModelList(e.target.value);
 document.querySelectorAll('[data-close]').forEach((b) => { b.onclick = () => { const s = b.closest('.sheet'); s.hidden = true; if (s && s.id === 'sheet-perm') requestsDismissed = true; }; });
 $('sheet-model').onclick = (e) => { if (e.target.id === 'sheet-model') $('sheet-model').hidden = true; };
 $('sheet-perm').onclick = (e) => { if (e.target.id === 'sheet-perm') { $('sheet-perm').hidden = true; requestsDismissed = true; } };
 inputEl.addEventListener('input', autosize);
+attachBtn.onclick = () => fileInput.click();
+fileInput.onchange = onFilesPicked;
 inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !window.matchMedia('(pointer:coarse)').matches) { e.preventDefault(); send(); } });
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden) resync(); });
@@ -816,4 +967,5 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+renderMachine();
 boot();

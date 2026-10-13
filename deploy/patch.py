@@ -88,8 +88,10 @@ def main():
         for pat in (
             r"^ *urlPath === '/app' \|\| urlPath\.startsWith\('/app/'\) \|\|\n",
             r"^ *urlPath === '/oc' \|\| urlPath\.startsWith\('/oc/'\) \|\|\n",
+            r"^ *urlPath === '/oc2' \|\| urlPath\.startsWith\('/oc2/'\) \|\|\n",
             r"^ *urlPath\.startsWith\('/app'\) \|\|\n",
             r"^ *urlPath\.startsWith\('/oc'\) \|\|\n",
+            r"^ *urlPath\.startsWith\('/oc2'\) \|\|\n",
         ):
             s = re.sub(pat, "", s, flags=re.M)
         marker = "      urlPath.startsWith('/gastometro') ||\n"
@@ -98,6 +100,7 @@ def main():
         canonical = (
             "      urlPath === '/app' || urlPath.startsWith('/app/') ||\n"
             "      urlPath === '/oc' || urlPath.startsWith('/oc/') ||\n"
+            "      urlPath === '/oc2' || urlPath.startsWith('/oc2/') ||\n"
         )
         return s.replace(marker, marker + canonical, 1)
 

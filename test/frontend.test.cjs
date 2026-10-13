@@ -2,7 +2,7 @@
 // Tests de las funciones puras del frontend (app/pure.js).
 // Uso: node test/frontend.test.cjs
 const path = require('path');
-const { md, esc, displayTitle, partKey } = require(path.join(__dirname, '..', 'app', 'pure.js'));
+const { md, esc, displayTitle, partKey, humanSize } = require(path.join(__dirname, '..', 'app', 'pure.js'));
 
 let pass = 0;
 let fail = 0;
@@ -21,6 +21,9 @@ check('displayTitle default de opencode', displayTitle({ title: 'New session - 2
 check('displayTitle real', displayTitle({ title: 'Hola mundo' }) === 'Hola mundo');
 check('partKey por id', partKey({ id: 'p1' }) === 'p1');
 check('partKey por callID', partKey({ type: 'tool', callID: 'c1' }) === 'tool:c1');
+check('humanSize bytes', humanSize(512) === '512 B');
+check('humanSize KB', humanSize(2048) === '2 KB');
+check('humanSize MB', humanSize(3 * 1024 * 1024) === '3.0 MB');
 
 console.log('\n' + pass + ' ok, ' + fail + ' fail');
 process.exit(fail ? 1 : 0);

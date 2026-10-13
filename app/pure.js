@@ -41,5 +41,11 @@
   function partKey(part) {
     return part.id || (part.type + ':' + (part.callID || ''));
   }
-  return { esc, fmtTime, md, displayTitle, partKey };
+  function humanSize(n) {
+    if (n == null) return '';
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
+  return { esc, fmtTime, md, displayTitle, partKey, humanSize };
 });

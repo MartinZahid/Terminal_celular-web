@@ -26,17 +26,23 @@
   <div id="chips">
     <div id="agent-chips"></div>
     <button id="btn-model" class="chip"><span id="model-label">Modelo</span></button>
+    <button id="btn-machine" class="chip"><span id="machine-label">Máquina</span></button>
   </div>
 
   <main id="chat" aria-live="polite"></main>
 
   <footer id="composer">
-    <textarea id="input" rows="1" placeholder="Escribe un mensaje…"
-      autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
-    <button id="btn-send" class="send" aria-label="Enviar">➤</button>
-    <button id="btn-stop" class="send stop" aria-label="Detener" hidden>■</button>
+    <div id="attachments" hidden></div>
+    <div id="composer-row">
+      <button id="btn-attach" class="icon attach" aria-label="Adjuntar archivo">📎</button>
+      <textarea id="input" rows="1" placeholder="Escribe un mensaje…"
+        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+      <button id="btn-send" class="send" aria-label="Enviar">➤</button>
+      <button id="btn-stop" class="send stop" aria-label="Detener" hidden>■</button>
+    </div>
   </footer>
 </div>
+<input type="file" id="file-input" multiple hidden>
 
 <div id="scrim" class="scrim" hidden></div>
 <aside id="drawer" hidden>
@@ -53,6 +59,13 @@
     <header><strong>Modelo</strong><button class="close" data-close>✕</button></header>
     <input id="model-search" placeholder="Buscar modelo…" autocomplete="off" spellcheck="false">
     <div id="model-list"></div>
+  </div>
+</div>
+
+<div id="sheet-machine" class="sheet" hidden>
+  <div class="sheet-card">
+    <header><strong>Máquina</strong><button id="machine-close" class="close" data-close>✕</button></header>
+    <div id="machine-list"></div>
   </div>
 </div>
 

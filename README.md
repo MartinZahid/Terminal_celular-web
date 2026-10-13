@@ -2,7 +2,8 @@
 
 App móvil (PWA) para usar **opencode** desde el celular: enviar mensajes, ver
 las respuestas en vivo, cambiar de chat (sesión), cambiar entre los agentes
-**Plan/Build** y cambiar de **modelo**.
+**Plan/Build**, cambiar de **modelo** y cambiar entre dos **máquinas**
+(principal/secundaria).
 
 La app es un cliente de un servidor `opencode serve` (API v1). Se integra en el
 servidor existente de **WhatsApp Team Sync** (WTS) para reutilizar el login
@@ -12,16 +13,51 @@ servidor existente de **WhatsApp Team Sync** (WTS) para reutilizar el login
 
 ```
 Celular ──> coffecode.lat/app        (PWA)
-        └─> coffecode.lat/oc/*       (proxy a la API de opencode)
+        ├─> coffecode.lat/oc/*       (proxy a la máquina principal)
+        └─> coffecode.lat/oc2/*      (proxy a la máquina secundaria)
 
-coffecode-web/server.js  ──proxy──>  WTS :3001  ──proxy /oc──>  opencode serve :4096
-                                                     └── sirve /app desde app/
+coffecode-web/server.js ──proxy──> WTS :3001 ──proxy /oc ──> opencode serve :4096  (principal)
+                                                    ├─proxy /oc2─> opencode serve :4097 (secundaria)
+                                                    └── sirve /app desde app/
 ```
 
 - `app/`            Frontend PWA (HTML/CSS/JS sin bundler).
 - `server/`         Módulo de integración que se copia al server WTS.
 - `deploy/`         Unidades systemd y `smoke-test.mjs`.
 - `install.sh`      Instala el servicio de opencode y enlaza la integración.
+
+## Cambiar de máquina
+
+La app ofrece un selector (chip **Máquina**) con dos destinos, cada uno con su
+propio `opencode serve`, sesiones y agentes:
+
+- **Principal** → `/oc`  → `OC_HOST:OC_PORT` (por defecto `127.0.0.1:4096`).
+- **Secundaria** → `/oc2` → `OC2_HOST:OC2_PORT` (solo si `OC2_PORT` está definido;
+  típicamente un túnel SSH, p. ej. `127.0.0.1:4097`).
+
+La primera vez que se abre la app se pregunta qué máquina usar; después se
+recuerda la última elección. Al cambiar de máquina se recargan sesiones,
+agentes y modelos. Las variables se configuran en
+`~/.config/terminal-celular/env`.
+
+### Terminal de PC (xterm)
+
+En PC, `/terminal` muestra la terminal negra con el mismo selector
+**Principal / Secundaria** en la cabecera (solo aparece si hay más de una
+máquina). **Principal** abre una shell en el servidor local; **Secundaria**
+abre una shell por SSH en la otra máquina, así que **la carga de trabajo corre
+ahí**. Se recuerda la última elección (`localStorage`). Requiere en
+`~/.config/terminal-celular/env`:
+
+```
+TERMINAL_SSH_HOST=40.233.2.94
+TERMINAL_SSH_USER=ubuntu
+TERMINAL_SSH_KEY=/home/martin/.ssh/40.233.2.94.key
+# TERMINAL_SSH_PORT=22
+```
+
+Si `TERMINAL_SSH_HOST` no está definido, la terminal solo ofrece la Principal
+(comportamiento de una sola máquina).
 
 ## Seguridad
 
@@ -74,13 +110,18 @@ El script:
 2. Crea y activa `opencode-serve.service` (systemd --user) en `127.0.0.1:4096`
    con `OPENCODE_SERVER_PASSWORD`.
 3. Copia `server/opencode-app.ts` a `Whatsapp-teamSync/server/src/`.
-4. Aplica los enganches en `server.ts` y las rutas `/app` y `/oc` en
+4. Aplica los enganches en `server.ts` y las rutas `/app`, `/oc` y `/oc2` en
    `coffecode-web/server.js` (idempotente; **falla** si falta un marcador).
-5. Configura `APP_DIR` y `OC_PASSWORD` en `whatsapp-teamsync.service`.
+5. Configura `APP_DIR`, `OC_PASSWORD`, `OC_HOST`/`OC_PORT` (y `OC2_*` si se
+   define `OC2_PORT`; y `TERMINAL_SSH_*` para la terminal de PC de la
+   secundaria) en `whatsapp-teamsync.service`.
 6. Recompila el server WTS.
 7. Reinicia WTS y recarga coffecode-web.
 
 ## Uso
 
 - Abre `https://coffecode.lat/app` en el celular e instálala como app.
-- En PC, `/terminal` sigue mostrando la terminal xterm; en móvil redirige a `/app`.
+- Pulsa 📎 para adjuntar archivos (varios, de cualquier tipo, hasta 10 MB cada
+  uno); se envían junto al mensaje como *file parts* (data URL base64).
+- En PC, `/terminal` muestra la terminal xterm con el selector de máquina; en
+  móvil redirige a `/app`.

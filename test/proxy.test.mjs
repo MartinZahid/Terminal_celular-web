@@ -14,26 +14,30 @@ const WTS = process.env.WTS_DIR || path.join(os.homedir(), 'Whatsapp-teamSync')
 // --- Upstream falso: registra lo que recibe y responde como opencode ---
 const calls = []
 const upstream = http.createServer((req, res) => {
-  calls.push({ path: req.url, headers: req.headers })
-  if (req.url.startsWith('/event')) {
-    res.writeHead(200, { 'content-type': 'text/event-stream' })
-    res.write('data: {"type":"server.connected"}\n\n')
-    res.end()
-    return
-  }
-  if (req.url.startsWith('/config/providers')) {
+  const rec = { path: req.url, headers: req.headers, body: '' }
+  calls.push(rec)
+  req.on('data', (c) => { rec.body += c })
+  req.on('end', () => {
+    if (req.url.startsWith('/event')) {
+      res.writeHead(200, { 'content-type': 'text/event-stream' })
+      res.write('data: {"type":"server.connected"}\n\n')
+      res.end()
+      return
+    }
+    if (req.url.startsWith('/config/providers')) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ providers: [{ id: 'a', key: 'SECRET', options: { apiKey: 'X', baseURL: 'u' } }] }))
+      return
+    }
+    if (req.url.startsWith('/session')) {
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.write(JSON.stringify([{ id: 's1', title: 't' }])) // chunked (sin content-length)
+      res.end()
+      return
+    }
     res.writeHead(200, { 'content-type': 'application/json' })
-    res.end(JSON.stringify({ providers: [{ id: 'a', key: 'SECRET', options: { apiKey: 'X', baseURL: 'u' } }] }))
-    return
-  }
-  if (req.url.startsWith('/session')) {
-    res.writeHead(200, { 'content-type': 'application/json' })
-    res.write(JSON.stringify([{ id: 's1', title: 't' }])) // chunked (sin content-length)
-    res.end()
-    return
-  }
-  res.writeHead(200, { 'content-type': 'application/json' })
-  res.end('{}')
+    res.end('{}')
+  })
 })
 await new Promise((r) => upstream.listen(0, '127.0.0.1', r))
 const UP_PORT = upstream.address().port
@@ -43,6 +47,9 @@ process.env.OC_KEEPALIVE = '0' // no abrir la suscripción persistente a opencod
 process.env.OC_HOST = '127.0.0.1'
 process.env.OC_PORT = String(UP_PORT)
 process.env.OC_PASSWORD = 'testpw'
+process.env.OC2_HOST = '127.0.0.1'
+process.env.OC2_PORT = String(UP_PORT)
+process.env.OC2_PASSWORD = 'testpw2'
 process.env.APP_DIR = path.join(__dirname, '..', 'app')
 process.env.DB_PATH = path.join(os.tmpdir(), 'tc-proxy-test-' + process.pid + '.db')
 delete process.env.ALLOWED_ORIGINS
@@ -118,6 +125,19 @@ try {
   r = await call('/oc/config/providers', { cookie: true })
   check('/config/providers sin secretos', r.status === 200 && !r.body.includes('SECRET') && !r.body.includes('apiKey'))
 
+  // --- Máquina secundaria (/oc2) ---
+  r = await call('/oc2/session')
+  check('/oc2 sin sesión -> 401', r.status === 401)
+
+  calls.length = 0
+  r = await call('/oc2/session', { cookie: true })
+  check('GET /oc2/session -> 200', r.status === 200)
+  const last2 = calls[calls.length - 1]
+  check('/oc2 usa su propia contraseña', !!last2 && last2.headers.authorization === 'Basic ' + Buffer.from('opencode:testpw2').toString('base64'))
+
+  r = await call('/oc2/provider', { cookie: true })
+  check('/oc2/provider (fuera de allowlist) -> 403', r.status === 403)
+
   r = await call('/app')
   check('/app sin sesión -> 302', r.status === 302)
   r = await call('/app', { cookie: true })
@@ -125,6 +145,15 @@ try {
 
   r = await call('/oc/event', { cookie: true })
   check('/oc/event -> 200 SSE', r.status === 200 && String(r.headers['content-type']).includes('text/event-stream') && r.body.includes('server.connected'))
+
+  calls.length = 0
+  const filePart = { type: 'file', mime: 'text/plain', filename: 'hola.txt', url: 'data:text/plain;base64,aG9sYQ==' }
+  r = await call('/oc/session/s1/prompt_async', { method: 'POST', cookie: true, headers: { origin: 'http://127.0.0.1:' + PORT }, body: JSON.stringify({ parts: [filePart, { type: 'text', text: 'mira' }], agent: 'movil' }) })
+  check('prompt_async con adjunto -> 200/204', r.status === 200 || r.status === 204)
+  const up = calls[calls.length - 1]
+  let parsed = null
+  try { parsed = JSON.parse(up.body) } catch {}
+  check('el upstream recibe el file part', !!parsed && parsed.parts && parsed.parts[0].type === 'file' && parsed.parts[0].filename === 'hola.txt')
 } finally {
   await new Promise((r) => server.close(r))
   await new Promise((r) => upstream.close(r))

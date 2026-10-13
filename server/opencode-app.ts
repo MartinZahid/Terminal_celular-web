@@ -4,10 +4,33 @@ import * as http from 'http'
 import type { IncomingMessage, ServerResponse } from 'http'
 import { getSession, getSessionToken, clientIp, clientUa, pinConfigured, isTerminalDisabled } from './auth.js'
 
-const OC_HOST = process.env.OC_HOST || '127.0.0.1'
-const OC_PORT = Number(process.env.OC_PORT || 4096)
 const APP_DIR = process.env.APP_DIR || join(process.env.HOME || '.', 'terminal-celular', 'app')
 const OC_PASSWORD = process.env.OC_PASSWORD || process.env.OPENCODE_SERVER_PASSWORD || ''
+
+// Destinos de opencode seleccionables por prefijo de ruta. `/oc` es el principal
+// (OC_HOST/OC_PORT) y `/oc2` el secundario (OC2_HOST/OC2_PORT); el secundario
+// solo existe si OC2_PORT está definido, para no romper deploys de una máquina.
+interface OcTarget {
+  host: string
+  port: number
+  password: string
+}
+
+const targets: Record<string, OcTarget> = {
+  '/oc': {
+    host: process.env.OC_HOST || '127.0.0.1',
+    port: Number(process.env.OC_PORT || 4096),
+    password: OC_PASSWORD,
+  },
+}
+
+if (process.env.OC2_PORT) {
+  targets['/oc2'] = {
+    host: process.env.OC2_HOST || '127.0.0.1',
+    port: Number(process.env.OC2_PORT),
+    password: process.env.OC2_PASSWORD || OC_PASSWORD,
+  }
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -119,51 +142,54 @@ export function sanitize(obj: unknown): void {
 // opencode para que nunca vea "0 clientes" cuando el teléfono se desconecta.
 // Evita que un turno se aborte por client_disconnect. Desactivable con OC_KEEPALIVE=0.
 const KEEPALIVE = process.env.OC_KEEPALIVE !== '0'
-let persistent: http.ClientRequest | null = null
+const persistent = new Map<string, http.ClientRequest>()
+const persistentRetry = new Map<string, number>()
 let persistentStopped = false
-let persistentRetry = 2000
 
-// Cabecera de autenticación hacia opencode (Basic con OC_PASSWORD).
-function ocAuthHeaders(): http.OutgoingHttpHeaders {
-  if (!OC_PASSWORD) return {}
-  return { authorization: 'Basic ' + Buffer.from('opencode:' + OC_PASSWORD).toString('base64') }
+// Cabecera de autenticación hacia opencode (Basic con la contraseña del destino).
+function ocAuthHeaders(t: OcTarget): http.OutgoingHttpHeaders {
+  if (!t.password) return {}
+  return { authorization: 'Basic ' + Buffer.from('opencode:' + t.password).toString('base64') }
 }
 
-function ensurePersistent(): void {
-  if (!KEEPALIVE || persistentStopped || persistent) return
+// Una suscripción por destino: mantiene viva cada máquina para que opencode no
+// vea "0 clientes" cuando el teléfono se desconecta.
+function ensurePersistent(key: string): void {
+  if (!KEEPALIVE || persistentStopped || persistent.has(key)) return
+  const t = targets[key]
+  if (!t) return
   const preq = http.request(
-    { host: OC_HOST, port: OC_PORT, path: '/event', method: 'GET', headers: { accept: 'text/event-stream', ...ocAuthHeaders() } },
+    { host: t.host, port: t.port, path: '/event', method: 'GET', headers: { accept: 'text/event-stream', ...ocAuthHeaders(t) } },
     (pres) => {
       if (pres.statusCode !== 200) {
         // Sin auth válida (401) u otro error: no mantener el stream y reintentar
         // con backoff, para no entrar en un bucle cada 2s.
         pres.resume()
-        persistent = null
-        persistentRetry = Math.min(persistentRetry * 2, 60000)
-        if (!persistentStopped) setTimeout(ensurePersistent, persistentRetry)
+        persistent.delete(key)
+        const next = Math.min((persistentRetry.get(key) || 2000) * 2, 60000)
+        persistentRetry.set(key, next)
+        if (!persistentStopped) setTimeout(() => ensurePersistent(key), next)
         return
       }
-      persistentRetry = 2000
+      persistentRetry.set(key, 2000)
       pres.on('data', () => {})
-      pres.on('end', () => { persistent = null; if (!persistentStopped) setTimeout(ensurePersistent, 2000) })
-      pres.on('error', () => { persistent = null; if (!persistentStopped) setTimeout(ensurePersistent, 2000) })
+      pres.on('end', () => { persistent.delete(key); if (!persistentStopped) setTimeout(() => ensurePersistent(key), 2000) })
+      pres.on('error', () => { persistent.delete(key); if (!persistentStopped) setTimeout(() => ensurePersistent(key), 2000) })
     }
   )
   preq.on('socket', (s) => { try { s.unref() } catch {} })
-  preq.on('error', () => { persistent = null; if (!persistentStopped) setTimeout(ensurePersistent, 2000) })
+  preq.on('error', () => { persistent.delete(key); if (!persistentStopped) setTimeout(() => ensurePersistent(key), 2000) })
   preq.end()
-  persistent = preq
+  persistent.set(key, preq)
 }
 
-ensurePersistent()
+for (const key of Object.keys(targets)) ensurePersistent(key)
 
-// Cierra la suscripción persistente para que el proceso pueda salir limpio.
+// Cierra las suscripciones persistentes para que el proceso pueda salir limpio.
 export function stopPersistent(): void {
   persistentStopped = true
-  if (persistent) {
-    try { persistent.destroy() } catch {}
-    persistent = null
-  }
+  for (const preq of persistent.values()) { try { preq.destroy() } catch {} }
+  persistent.clear()
 }
 
 function serveApp(res: ServerResponse, urlPath: string): void {
@@ -187,14 +213,14 @@ function serveApp(res: ServerResponse, urlPath: string): void {
   res.end(readFileSync(full))
 }
 
-function proxy(req: IncomingMessage, res: ServerResponse, targetPath: string): void {
-  const headers: http.OutgoingHttpHeaders = { ...(req.headers as Record<string, unknown>), host: `${OC_HOST}:${OC_PORT}` }
+function proxy(req: IncomingMessage, res: ServerResponse, targetPath: string, t: OcTarget): void {
+  const headers: http.OutgoingHttpHeaders = { ...(req.headers as Record<string, unknown>), host: `${t.host}:${t.port}` }
   // No filtrar credenciales del cliente ni cabeceras hop-by-hop al upstream.
   for (const h of ['cookie', 'authorization', 'accept-encoding', 'connection', 'upgrade', 'keep-alive', 'te', 'trailer', 'transfer-encoding', 'proxy-authorization', 'proxy-authenticate']) delete headers[h]
   // Autenticación propia del servidor opencode (si está configurada).
-  Object.assign(headers, ocAuthHeaders())
+  Object.assign(headers, ocAuthHeaders(t))
   const preq = http.request(
-    { host: OC_HOST, port: OC_PORT, path: targetPath, method: req.method, headers },
+    { host: t.host, port: t.port, path: targetPath, method: req.method, headers },
     (pres) => {
       const ct = String(pres.headers['content-type'] || '')
       const isSSE = ct.includes('text/event-stream')
@@ -254,25 +280,27 @@ export function handleAppRequest(req: IncomingMessage, res: ServerResponse, url:
     serveApp(res, path)
     return true
   }
-  if (path === '/oc' || path.startsWith('/oc/')) {
-    if (!sameOriginOk(req)) {
-      res.writeHead(403, { 'content-type': 'application/json' })
-      res.end('{"error":"csrf"}')
+  for (const key of Object.keys(targets)) {
+    if (path === key || path.startsWith(key + '/')) {
+      if (!sameOriginOk(req)) {
+        res.writeHead(403, { 'content-type': 'application/json' })
+        res.end('{"error":"csrf"}')
+        return true
+      }
+      if (!authed(req)) {
+        res.writeHead(401, { 'content-type': 'application/json' })
+        res.end('{"error":"unauthorized"}')
+        return true
+      }
+      const rest = path.slice(key.length) + (url.search || '')
+      if (!allowedPath(rest)) {
+        res.writeHead(403, { 'content-type': 'application/json' })
+        res.end('{"error":"forbidden"}')
+        return true
+      }
+      proxy(req, res, rest || '/', targets[key])
       return true
     }
-    if (!authed(req)) {
-      res.writeHead(401, { 'content-type': 'application/json' })
-      res.end('{"error":"unauthorized"}')
-      return true
-    }
-    const rest = path.replace(/^\/oc/, '') + (url.search || '')
-    if (!allowedPath(rest)) {
-      res.writeHead(403, { 'content-type': 'application/json' })
-      res.end('{"error":"forbidden"}')
-      return true
-    }
-    proxy(req, res, rest || '/')
-    return true
   }
   return false
 }
