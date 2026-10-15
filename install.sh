@@ -65,7 +65,7 @@ if [ -n "${TERMINAL_SSH_HOST:-}" ]; then
 fi
 chmod 600 "$ENV_FILE"
 # Limpieza de instalaciones previas (secretos en texto plano + archivo viejo).
-for f in "$USER_UNIT_DIR/opencode-serve.service" "$USER_UNIT_DIR/whatsapp-teamsync.service" "$USER_UNIT_DIR/terminal-celular.service"; do
+for f in "$USER_UNIT_DIR/opencode-serve.service" "$USER_UNIT_DIR/terminal-celular.service"; do
   [ -f "$f" ] && sed -i '/^Environment=\(OC_PASSWORD\|OPENCODE_SERVER_PASSWORD\)=/d' "$f"
 done
 rm -f "$ENV_DIR/oc-password"
@@ -89,16 +89,9 @@ systemctl --user daemon-reload
 systemctl --user enable --now terminal-celular.service
 systemctl --user restart terminal-celular.service
 
-echo "==> 5/6  Migrar google-oauth.json"
+echo "==> 5/6  Verificar credenciales OAuth"
 if [ ! -f "$DATA_DIR/google-oauth.json" ]; then
-  SRC="$HOME/Whatsapp-teamSync/server/data/google-oauth.json"
-  if [ -f "$SRC" ]; then
-    cp "$SRC" "$DATA_DIR/google-oauth.json"
-    chmod 600 "$DATA_DIR/google-oauth.json"
-    echo "  copiado desde $SRC"
-  else
-    echo "  AVISO: no hay google-oauth.json; configura el OAuth de Google en $DATA_DIR"
-  fi
+  echo "  AVISO: falta $DATA_DIR/google-oauth.json; configura el OAuth de Google ahí (chmod 600)"
 else
   echo "  ya existe $DATA_DIR/google-oauth.json"
 fi

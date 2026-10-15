@@ -12,8 +12,8 @@ const DISABLE_FILE = join(DB_DIR, 'terminal-disabled')
 const AUDIT_PATH = join(DB_DIR, 'security.log')
 
 export const ALLOWED_EMAIL = 'martinzahidpro@gmail.com'
-export const COOKIE_NAME = 'wts_session'
-const STATE_COOKIE = 'wts_oauth_state'
+export const COOKIE_NAME = 'tc_session'
+const STATE_COOKIE = 'tc_oauth_state'
 
 const IDLE_TIMEOUT_MS = 15 * 60 * 1000 // 15 min sin actividad
 const MAX_LIFETIME_MS = 8 * 60 * 60 * 1000 // 8 h tope absoluto

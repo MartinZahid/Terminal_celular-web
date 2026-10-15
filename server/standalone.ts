@@ -1,5 +1,5 @@
 // Servicio independiente de Terminal Celular: app movil (PWA), proxy /oc y /oc2,
-// auth Google + PIN y terminal xterm (PTY). NO depende del servidor de WhatsApp.
+// auth Google + PIN y terminal xterm (PTY). Servicio independiente.
 
 import { WebSocketServer, WebSocket } from 'ws'
 import { createServer, IncomingMessage, ServerResponse } from 'http'

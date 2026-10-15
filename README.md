@@ -7,9 +7,7 @@ las respuestas en vivo, cambiar de chat (sesión), cambiar entre los agentes
 
 Es un **servicio independiente** (`server/standalone.ts`, systemd --user en
 `127.0.0.1:3100`): sirve la app, el login (Google + PIN), la terminal (PTY) y el
-proxy a `opencode serve`. **No depende de Whatsapp-teamSync (WTS)**: WTS queda
-solo para WhatsApp. Ambos se publican bajo el mismo dominio `coffecode.lat` a
-través de `coffecode-web`.
+proxy a `opencode serve`. No comparte nada con otros servicios.
 
 ## Arquitectura
 
@@ -20,8 +18,7 @@ Celular/PC ──> coffecode.lat/app       (PWA)
             └─> coffecode.lat/terminal  (xterm + PTY)
 
 coffecode-web/server.js
-  ├─ /app /oc /oc2 /auth /terminal ──> terminal-celular :3100 ──> opencode serve :4096 / :4097
-  └─ /api /dashboard /gastometro ────> Whatsapp-teamSync :3001
+  └─ /app /oc /oc2 /auth /terminal ──> terminal-celular :3100 ──> opencode serve :4096 / :4097
 ```
 
 - `app/`        Frontend PWA (HTML/CSS/JS sin bundler) + `terminal.html` (xterm).
@@ -119,7 +116,7 @@ El script:
 2. Crea y activa `opencode-serve.service` (systemd --user) en `127.0.0.1:4096`.
 3. Compila el servicio (`npm install --include=dev && npm run build` → `dist/`).
 4. Crea y activa `terminal-celular.service` (systemd --user) en `127.0.0.1:3100`.
-5. Migra `google-oauth.json` a `~/.config/terminal-celular/data` (si falta).
+5. Verifica `google-oauth.json` en `~/.config/terminal-celular/data`.
 6. Recarga `coffecode-web`.
 
 ## Uso

@@ -55,8 +55,8 @@ test('allowedPath bloquea lo peligroso', () => {
 
 test('sameOriginOk valida métodos mutantes', () => {
   const post = (h) => sameOriginOk({ method: 'POST', headers: h })
-  assert.equal(post({ origin: 'https://coffecode.lat', host: 'localhost:3001' }), false)
-  assert.equal(post({ origin: 'https://coffecode.lat', host: 'localhost:3001', 'x-forwarded-host': 'coffecode.lat' }), true)
+  assert.equal(post({ origin: 'https://coffecode.lat', host: 'localhost:3100' }), false)
+  assert.equal(post({ origin: 'https://coffecode.lat', host: 'localhost:3100', 'x-forwarded-host': 'coffecode.lat' }), true)
   assert.equal(post({ origin: 'https://coffecode.lat', host: 'coffecode.lat' }), true)
   assert.equal(sameOriginOk({ method: 'GET', headers: {} }), true)
 })
