@@ -1,10 +1,7 @@
 'use strict';
 // Funciones puras de la app (sin DOM), compartidas con los tests.
-(function (root, factory) {
-  const api = factory();
-  if (typeof module !== 'undefined' && module.exports) module.exports = api;
-  else for (const k in api) root[k] = api[k];
-})(typeof self !== 'undefined' ? self : this, function () {
+// En el navegador se cargan como script clásico y asignan a globalThis.
+(function () {
   function esc(s) {
     return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
@@ -42,10 +39,12 @@
     return part.id || (part.type + ':' + (part.callID || ''));
   }
   function humanSize(n) {
-    if (n == null) return '';
     if (n < 1024) return n + ' B';
     if (n < 1024 * 1024) return Math.round(n / 1024) + ' KB';
     return (n / (1024 * 1024)).toFixed(1) + ' MB';
   }
-  return { esc, fmtTime, md, displayTitle, partKey, humanSize };
-});
+  const api = { esc, fmtTime, md, displayTitle, partKey, humanSize };
+  const root = typeof globalThis !== 'undefined' ? globalThis : this;
+  if (root) Object.assign(root, api);
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})();

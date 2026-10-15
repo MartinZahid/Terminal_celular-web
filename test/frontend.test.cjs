@@ -2,7 +2,11 @@
 // Tests de las funciones puras del frontend (app/pure.js).
 // Uso: node test/frontend.test.cjs
 const path = require('path');
-const { md, esc, displayTitle, partKey, humanSize } = require(path.join(__dirname, '..', 'app', 'pure.js'));
+const vm = require('vm');
+const { readFileSync } = require('fs');
+const ctx = vm.createContext({});
+vm.runInContext(readFileSync(path.join(__dirname, '..', 'app', 'pure.js'), 'utf8'), ctx, { filename: 'pure.js' });
+const { md, esc, displayTitle, partKey, humanSize } = ctx;
 
 let pass = 0;
 let fail = 0;

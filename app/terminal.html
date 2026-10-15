@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>Terminal - CoffeCode</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background: #0d1117;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #e6edf3;
+}
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; background: #161b22; border-bottom: 1px solid #30363d;
+}
+header .logo { font-size: 14px; font-weight: 600; }
+header .logo span { color: #7cfc5a; }
+header .actions { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8b949e; }
+header button, header a.button {
+  background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+  padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; font-family: inherit;
+  text-decoration: none; display: inline-block;
+}
+header button:hover, header a.button:hover { background: #30363d; }
+header a.link { color: #8b949e; text-decoration: none; }
+header a.link:hover { color: #e6edf3; }
+#machine-picker { display: flex; gap: 4px; margin-right: 4px; }
+#machine-picker button { padding: 5px 10px; }
+#machine-picker button.active { background: #7cfc5a; color: #0d1117; border-color: #7cfc5a; }
+#terminal-container { position: absolute; inset: 0; top: 47px; padding: 10px; }
+#term { height: 100%; width: 100%; }
+.center {
+  height: calc(100vh - 47px); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 24px;
+}
+.center h2 { font-weight: 600; font-size: 20px; }
+.center p { color: #8b949e; font-size: 14px; max-width: 460px; }
+.pin-box { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 28px; width: 100%; max-width: 340px; }
+.pin-box label { font-size: 12px; color: #8b949e; display: block; margin-bottom: 8px; }
+.pin-box input {
+  width: 100%; padding: 10px 12px; font-size: 22px; text-align: center; letter-spacing: 8px;
+  background: #0d1117; color: #e6edf3; border: 1px solid #30363d; border-radius: 8px; outline: none;
+}
+.pin-box input:focus { border-color: #7cfc5a; }
+.pin-box .row { display: flex; gap: 8px; margin-top: 12px; }
+.pin-box button {
+  flex: 1; padding: 10px; border: none; border-radius: 8px; font-size: 14px; font-weight: 500;
+  cursor: pointer; font-family: inherit;
+}
+.pin-box .primary { background: #7cfc5a; color: #0d1117; }
+.pin-box .ghost { background: #21262d; color: #e6edf3; border: 1px solid #30363d; }
+.pin-error { color: #f85149; font-size: 13px; margin-top: 10px; min-height: 18px; }
+.mono-box {
+  font-family: Consolas, Menlo, monospace; background: #0d1117; border: 1px solid #30363d;
+  border-radius: 8px; padding: 14px 18px; font-size: 13px; color: #7cfc5a;
+}
+#touchbar {
+  display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+  background: #161b22; border-top: 1px solid #30363d; padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  gap: 6px; flex-wrap: wrap; justify-content: center;
+  max-height: 42vh; overflow-y: auto;
+}
+#touchbar button {
+  flex: 0 1 auto; min-width: 56px; padding: 9px 10px; font-size: 13px; font-weight: 600;
+  background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 8px;
+  cursor: pointer; font-family: inherit; touch-action: manipulation; user-select: none;
+}
+#touchbar button:active { background: #30363d; }
+#touchbar button.active { background: #7cfc5a; color: #0d1117; border-color: #7cfc5a; }
+@media (hover: none) and (pointer: coarse) and (max-width: 900px) {
+  body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+  header { padding-top: calc(8px + env(safe-area-inset-top)); padding-left: 10px; padding-right: 10px; padding-bottom: 8px; }
+  header .logo { font-size: 12px; }
+  header .actions { gap: 6px; }
+  header a.link { display: none; }
+  header button, header a.button { padding: 6px 8px; font-size: 11px; }
+  .center { height: calc(100vh - 47px); height: calc(100dvh - env(safe-area-inset-top) - 47px); }
+  #terminal-container { top: 47px; padding: 4px 4px 8px 4px; bottom: 44px; }
+  #touchbar { display: flex; }
+  #term { height: 100% !important; }
+  #touchbar button { flex: 1 1 auto; min-width: 62px; min-height: 42px; padding: 10px 12px; font-size: 13px; }
+  .xterm-helper-textarea { font-size: 16px !important; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">CoffeCode<span>_terminal</span></div>
+  <div class="actions">
+    <div id="machine-picker" style="display:none" aria-label="Máquina"></div>
+    <span id="conn-status" style="color:#8b949e">Cargando…</span>
+    <a class="link" href="/dashboard">Dashboard</a>
+    <a class="link" href="/">Inicio</a>
+    <button id="btn-lock" title="Apagar la terminal (requiere PIN)" style="display:none">Bloquear</button>
+    <button id="btn-logout" title="Cerrar esta sesión">Salir</button>
+    <button id="btn-logout-all" title="Cerrar todas las sesiones activas" style="display:none">Salir de todo</button>
+  </div>
+</header>
+
+<div id="screen">
+  <div id="terminal-container" style="display:none">
+    <div id="term"></div>
+  </div>
+
+<div id="touchbar" aria-label="Atajos de teclado">
+    <button id="btn-ctrl" title="Ctrl (se aplica al próximo botón o letra)">Ctrl</button>
+    <button data-send="\x03" title="Ctrl+C / interrumpir">Ctrl+C</button>
+    <button data-send="\x0c" title="Ctrl+L / limpiar">Cls</button>
+    <button data-send="\x7f" title="Borrar carácter">&#9003;</button>
+    <button data-send="\t" title="Tab">Tab</button>
+    <button data-send="\x10" title="Ctrl+P / cambiar modelo">Modelo</button>
+    <button data-send="\x1b" title="Escape / volver">Esc</button>
+    <button data-send="\r" title="Enter">Enter</button>
+    <button data-send="\x1b[A" title="Flecha arriba">&#8593;</button>
+    <button data-send="\x1b[B" title="Flecha abajo">&#8595;</button>
+    <button data-send="\x1b[C" title="Flecha derecha">&#8594;</button>
+    <button data-send="\x1b[D" title="Flecha izquierda">&#8592;</button>
+    <button data-send="\x1b[H" title="Inicio de línea">Inicio</button>
+    <button id="btn-kbd" title="Mostrar / ocultar teclado">&#9000; Teclado</button>
+    <button id="btn-copy" title="Copiar todo el contenido">&#128203; Copiar</button>
+  </div>
+
+  <div id="pin-screen" class="center" style="display:none">
+    <div class="pin-box">
+      <h2 style="margin-bottom:4px">Verificación de PIN</h2>
+      <p style="font-size:12px;color:#8b949e;margin-bottom:16px">Lo ingresaste cuando configuramos la terminal.</p>
+      <label for="pin-input">PIN</label>
+      <input id="pin-input" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••">
+      <div class="row">
+        <button class="ghost" onclick="logout()">Cancelar</button>
+        <button class="primary" id="pin-submit">Ingresar</button>
+      </div>
+      <div class="pin-error" id="pin-error"></div>
+    </div>
+  </div>
+
+  <div id="disabled-screen" class="center" style="display:none">
+    <div class="mono-box">terminal: disabled</div>
+    <h2>Terminal deshabilitada</h2>
+    <p>La terminal está bloqueada. Para volver a usarla, actívala aquí. (Se registra en el log de seguridad.)</p>
+    <button class="primary" id="btn-enable" style="background:#7cfc5a;color:#0d1117;border:none;padding:10px 20px;border-radius:8px;cursor:pointer;font-family:inherit;font-weight:600">Reactivar terminal</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script>
+let term = null
+let socket = null
+let fitAddon = null
+let sessionToken = null
+let machine = localStorage.getItem('term-machine') || 'local'
+let machinesList = []
+const statusEl = document.getElementById('conn-status')
+const isMobile = () => window.matchMedia('(hover: none) and (pointer: coarse) and (max-width: 900px)').matches
+
+function setStatus(text, color) {
+  statusEl.textContent = text
+  statusEl.style.color = color || '#8b949e'
+}
+
+function copyToClipboard(text) {
+  if (!text) return
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text))
+  } else {
+    fallbackCopy(text)
+  }
+}
+function fallbackCopy(text) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0'
+  document.body.appendChild(ta)
+  ta.focus()
+  ta.select()
+  let ok = false
+  try { ok = document.execCommand('copy') } catch (e) { ok = false }
+  document.body.removeChild(ta)
+  setStatus(ok ? '✓ copiado' : '✕ no se pudo copiar', ok ? '#7cfc5a' : '#f85149')
+  setTimeout(() => setStatus('● conectado', '#7cfc5a'), 2000)
+}
+
+let ctrlSticky = false
+function ctrlKeyCode(s) { return String.fromCharCode(s.charCodeAt(0) & 0x1f) }
+function updateCtrlBtn() {
+  const b = document.getElementById('btn-ctrl')
+  if (b) b.classList.toggle('active', ctrlSticky)
+}
+
+async function logout() {
+  await fetch('/auth/logout')
+  window.location.href = '/auth/login'
+}
+
+async function logoutAll() {
+  await fetch('/auth/logout-all')
+  window.location.href = '/auth/login'
+}
+
+async function lockTerminal() {
+  const r = await fetch('/auth/terminal-off')
+  if (r.ok) location.reload()
+}
+
+async function enableTerminal() {
+  const r = await fetch('/auth/terminal-on')
+  if (r.ok) location.reload()
+}
+
+function renderMachines(list) {
+  machinesList = list || []
+  const el = document.getElementById('machine-picker')
+  if (!el) return
+  if (machinesList.length < 2) { el.style.display = 'none'; el.innerHTML = ''; return }
+  el.style.display = 'flex'
+  el.innerHTML = ''
+  machinesList.forEach((m) => {
+    const b = document.createElement('button')
+    b.textContent = m.label
+    b.className = m.id === machine ? 'active' : ''
+    b.addEventListener('click', () => selectMachine(m.id))
+    el.appendChild(b)
+  })
+}
+
+function machineLabel() {
+  const m = machinesList.find((x) => x.id === machine)
+  return m ? m.label : machine
+}
+
+function selectMachine(id) {
+  if (id === machine) return
+  // Guarda la elección y recarga con la máquina en la URL: el arranque
+  // reconecta directo a la máquina elegida (a prueba de caché/estado del socket).
+  localStorage.setItem('term-machine', id)
+  const u = new URL(location.href)
+  u.searchParams.set('machine', id)
+  location.href = u.toString()
+}
+
+function connect() {
+  let wsHost, proto
+  if (location.hostname === 'coffecode.lat') {
+    wsHost = location.host
+    proto = 'wss'
+  } else {
+    wsHost = location.host
+    proto = 'ws'
+  }
+  const params = []
+  if (sessionToken) params.push(`token=${encodeURIComponent(sessionToken)}`)
+  params.push(`machine=${encodeURIComponent(machine)}`)
+  socket = new WebSocket(`${proto}://${wsHost}/terminal/ws?${params.join('&')}`)
+
+  socket.onopen = () => {
+    setStatus('● conectado · ' + machineLabel(), '#7cfc5a')
+    if (fitAddon) fitAddon.fit()
+    // Re-announce our size. The server keeps the SAME shell across reconnects,
+    // and the resize (SIGWINCH) makes TUI apps (opencode) repaint their screen.
+    socket.send('\x00' + term.cols + 'x' + term.rows)
+    // Client-side keepalive: browsers/NATs can drop idle WebSockets.
+    if (socket.wsPing) clearInterval(socket.wsPing)
+    socket.wsPing = setInterval(() => {
+      if (socket && socket.readyState === WebSocket.OPEN) socket.send('')
+    }, 25000)
+  }
+
+  socket.onmessage = (ev) => { if (ev.data) term.write(ev.data) }
+
+  socket.onclose = () => {
+    setStatus('○ reconectando… (' + machineLabel() + ')', '#f85149')
+    if (socket.wsPing) { clearInterval(socket.wsPing); socket.wsPing = null }
+    setTimeout(connect, 1500)
+  }
+
+  socket.onerror = () => setStatus('✕ error', '#f85149')
+}
+
+function initTerminal() {
+  document.getElementById('pin-screen').style.display = 'none'
+  document.getElementById('disabled-screen').style.display = 'none'
+  document.getElementById('terminal-container').style.display = 'block'
+  document.getElementById('touchbar').style.display = isMobile() ? 'flex' : 'none'
+  document.getElementById('btn-lock').style.display = 'inline-block'
+  document.getElementById('btn-logout-all').style.display = 'inline-block'
+
+  term = new Terminal({
+    cursorBlink: true,
+    fontSize: isMobile() ? 13 : 14,
+    fontFamily: '"JetBrains Mono", "Cascadia Code", Consolas, monospace',
+    allowProposedApi: true,
+    rightClickSelectsWord: true,
+    theme: {
+      background: '#0d1117',
+      foreground: '#e6edf3',
+      cursor: '#7cfc5a',
+      selectionBackground: '#264f78',
+      selectionForeground: '#ffffff',
+      black: '#484f58', red: '#ff7b72', green: '#7cfc5a', yellow: '#d29922',
+      blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#e6edf3',
+      brightBlack: '#6e7681', brightRed: '#ffa198', brightGreen: '#a5d6ff',
+      brightYellow: '#e3b341', brightBlue: '#79c0ff', brightMagenta: '#d2a8ff',
+      brightCyan: '#56d4dd', brightWhite: '#ffffff'
+    }
+  })
+  fitAddon = new FitAddon.FitAddon()
+  term.loadAddon(fitAddon)
+  term.open(document.getElementById('term'))
+
+  const termEl = document.getElementById('term')
+  termEl.addEventListener('contextmenu', (e) => {
+    e.preventDefault()
+    const selected = term.getSelection() || ''
+    const menu = document.createElement('div')
+    menu.style.cssText = `position:fixed;z-index:999;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:4px;box-shadow:0 8px 24px rgba(0,0,0,0.5);font-family:inherit;font-size:12px;color:#e6edf3;`
+    const mk = (label, fn, disabled) => {
+      const b = document.createElement('button')
+      b.textContent = label
+      b.style.cssText = `display:block;width:100%;text-align:left;background:transparent;border:none;color:${disabled ? '#6e7681' : '#e6edf3'};padding:6px 12px;border-radius:6px;cursor:${disabled ? 'default' : 'pointer'};font-family:inherit;font-size:12px;`
+      b.onmouseenter = () => { if (!disabled) b.style.background = '#30363d' }
+      b.onmouseleave = () => { b.style.background = 'transparent' }
+      b.onclick = () => { document.body.removeChild(menu); fn() }
+      if (disabled) b.disabled = true
+      menu.appendChild(b)
+    }
+    mk('Copiar', () => copyToClipboard(selected))
+    mk('Pegar', () => {
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.readText().then((t) => term.paste(t)).catch(() => {})
+      } else {
+        const t = prompt('Pega aquí el texto a insertar:')
+        if (t) term.paste(t)
+      }
+    })
+    mk('Copiar todo', () => {
+      let full = ''
+      for (let i = 0; i < term.buffer.active.length; i++) {
+        full += term.buffer.active.getLine(i).translateToString(true) + '\n'
+      }
+      copyToClipboard(full.trim())
+    })
+    menu.style.left = `${e.clientX}px`
+    menu.style.top = `${e.clientY}px`
+    document.body.appendChild(menu)
+    const remove = () => { if (menu.parentNode) document.body.removeChild(menu) }
+    setTimeout(() => {
+      document.addEventListener('click', remove, { once: true })
+      document.addEventListener('contextmenu', remove, { once: true })
+    }, 0)
+  })
+
+  term.onData((data) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      if (ctrlSticky && data.length === 1) {
+        const c = data.charCodeAt(0)
+        if (c >= 0x20 && c < 0x7f) {
+          ctrlSticky = false
+          updateCtrlBtn()
+          socket.send(ctrlKeyCode(data))
+          return
+        }
+      }
+      socket.send(data)
+    }
+  })
+
+  const container = document.getElementById('terminal-container')
+  if (window.ResizeObserver && container) {
+    new ResizeObserver(() => smartFit()).observe(container)
+  }
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncLayout)
+    window.visualViewport.addEventListener('scroll', syncLayout)
+  }
+  window.addEventListener('resize', smartFit)
+
+  if (isMobile()) {
+    termEl.addEventListener('touchstart', () => { focusTerminal() }, { passive: true })
+  }
+
+  requestAnimationFrame(() => {
+    syncLayout()
+    smartFit()
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send('\x00' + term.cols + 'x' + term.rows)
+    }
+  })
+
+  connect()
+}
+
+function showPin() {
+  document.getElementById('terminal-container').style.display = 'none'
+  document.getElementById('touchbar').style.display = 'none'
+  document.getElementById('disabled-screen').style.display = 'none'
+  document.getElementById('pin-screen').style.display = 'flex'
+  document.getElementById('btn-lock').style.display = 'none'
+  document.getElementById('btn-logout-all').style.display = 'none'
+  document.getElementById('pin-input').focus()
+}
+
+function showDisabled() {
+  document.getElementById('terminal-container').style.display = 'none'
+  document.getElementById('touchbar').style.display = 'none'
+  document.getElementById('pin-screen').style.display = 'none'
+  document.getElementById('disabled-screen').style.display = 'flex'
+  document.getElementById('btn-lock').style.display = 'none'
+  document.getElementById('btn-logout-all').style.display = 'none'
+}
+
+async function verifyPin() {
+  const pin = document.getElementById('pin-input').value.trim()
+  const err = document.getElementById('pin-error')
+  err.textContent = ''
+  if (!pin) { err.textContent = 'Ingresa el PIN.'; return }
+
+  const r = await fetch('/auth/verify-pin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pin })
+  })
+  const data = await r.json().catch(() => ({ ok: false }))
+  if (data.ok) {
+    location.reload()
+  } else {
+    err.textContent = data.blocked
+      ? `Demasiados intentos. Bloqueado ${Math.ceil(data.blocked / 60)} min.`
+      : 'PIN incorrecto.'
+    document.getElementById('pin-input').value = ''
+    document.getElementById('pin-input').focus()
+  }
+}
+
+document.getElementById('btn-logout').addEventListener('click', logout)
+document.getElementById('btn-logout-all').addEventListener('click', logoutAll)
+document.getElementById('btn-lock').addEventListener('click', lockTerminal)
+document.getElementById('btn-enable').addEventListener('click', enableTerminal)
+document.getElementById('pin-submit').addEventListener('click', verifyPin)
+document.getElementById('pin-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') verifyPin() })
+
+function decodeKeys(ds) {
+  return ds.replace(/\\(t|r|n)/g, (_m, c) => ({ t: '\t', r: '\r', n: '\n' }[c]))
+           .replace(/\\x([0-9a-f]{2})/gi, (_m, h) => String.fromCharCode(parseInt(h, 16)))
+}
+document.querySelectorAll('#touchbar button[data-send]').forEach((b) => {
+  b.addEventListener('click', () => {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return
+    let ds = decodeKeys(b.dataset.send)
+    if (ctrlSticky) {
+      if (/^\x1b\[[ABCD]$/.test(ds)) {
+        // Arrow + Ctrl -> Ctrl+arrow (word jump)
+        ds = ds.replace(/^(\x1b\[)([ABCD])$/, '\x1b[1;5$2')
+      } else if (ds.length === 1) {
+        const c = ds.charCodeAt(0)
+        if (c >= 0x20 && c < 0x7f) ds = ctrlKeyCode(ds)
+      }
+      ctrlSticky = false
+      updateCtrlBtn()
+    }
+    socket.send(ds)
+  })
+})
+
+const ctrlBtn = document.getElementById('btn-ctrl')
+if (ctrlBtn) {
+  ctrlBtn.addEventListener('click', () => {
+    ctrlSticky = !ctrlSticky
+    updateCtrlBtn()
+  })
+}
+
+const kbdBtn = document.getElementById('btn-kbd')
+let kbdOpen = false
+function focusTerminal() {
+  if (!term) return
+  const ta = term.textarea
+  try { ta.focus({ preventScroll: true }) } catch (e) { ta.focus() }
+}
+function toggleKbd() {
+  if (!term) return
+  const ta = term.textarea
+  if (document.activeElement === ta) {
+    try { ta.blur() } catch (e) {}
+    kbdOpen = false
+  } else {
+    focusTerminal()
+    kbdOpen = true
+  }
+}
+if (kbdBtn) kbdBtn.addEventListener('click', toggleKbd)
+
+const copyBtn = document.getElementById('btn-copy')
+if (copyBtn) {
+  copyBtn.addEventListener('click', () => {
+    if (!term) return
+    let full = ''
+    for (let i = 0; i < term.buffer.active.length; i++) {
+      full += term.buffer.active.getLine(i).translateToString(true) + '\n'
+    }
+    copyToClipboard(full.trim())
+  })
+}
+
+function syncLayout() {
+  if (!isMobile()) return
+  const container = document.getElementById('terminal-container')
+  const headerEl = document.querySelector('header')
+  const touchbarEl = document.getElementById('touchbar')
+  if (!container || !headerEl) return
+  const vvh = window.visualViewport ? window.visualViewport.height : window.innerHeight
+  const headerH = headerEl.offsetHeight
+  const touchH = touchbarEl && getComputedStyle(touchbarEl).display !== 'none' ? touchbarEl.offsetHeight : 0
+  // Keyboard visible (visual viewport much smaller than layout viewport)
+  const kbH = vvh < window.innerHeight - 40 ? (window.innerHeight - vvh) : 0
+  if (touchbarEl) touchbarEl.style.bottom = kbH + 'px'
+  container.style.bottom = 'auto'
+  container.style.top = headerH + 'px'
+  const h = Math.max(40, vvh - headerH - touchH - 4)
+  container.style.height = h + 'px'
+  smartFit()
+}
+
+let fitTimer = null
+function smartFit() {
+  if (fitTimer) return
+  fitTimer = setTimeout(() => {
+    fitTimer = null
+    if (!term || !fitAddon) return
+    fitAddon.fit()
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send('\x00' + term.cols + 'x' + term.rows)
+    }
+  }, 80)
+}
+async function boot() {
+  try {
+    const m = await (await fetch('/auth/me')).json()
+    if (!m.authenticated) { window.location.href = '/auth/login'; return }
+
+    sessionToken = m.sessionToken || null
+    if (!m.enabled) { showDisabled(); return }
+    if (m.pinConfigured && !m.pinVerified) { showPin(); return }
+
+    let list = [{ id: 'local', label: 'Principal' }]
+    try {
+      const fetched = await (await fetch('/terminal/machines')).json()
+      if (Array.isArray(fetched) && fetched.length) list = fetched
+    } catch (e) { /* usa solo Principal */ }
+    const urlMachine = new URLSearchParams(location.search).get('machine')
+    if (urlMachine) machine = urlMachine
+    if (!list.some((x) => x.id === machine)) machine = list[0].id
+    renderMachines(list)
+
+    initTerminal()
+  } catch {
+    window.location.href = '/auth/login'
+  }
+}
+
+window.addEventListener('DOMContentLoaded', boot)
+</script>
+</body>
+</html>

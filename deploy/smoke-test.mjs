@@ -4,38 +4,40 @@
 //   node deploy/smoke-test.mjs
 //
 // Variables (opcionales):
-//   WTS_DIR   directorio del proyecto Whatsapp-teamSync (default /home/martin/Whatsapp-teamSync)
+//   TC_DIR    directorio de este repo (default ~/terminal-celular)
 //   EMAIL     email autorizado para crear la sesión de prueba
 //
-// El almacén de sesiones de WTS es en memoria y por proceso, así que este test
+// El almacén de sesiones es en memoria y por proceso, así que este test
 // levanta un servidor HTTP efímero que usa el MISMO módulo handleAppRequest y
 // crea la sesión en el mismo proceso. Así prueba auth, allowlist, saneo de
 // credenciales, CRUD de sesiones y SSE real contra `opencode serve`.
 //
-// La cadena completa (coffecode-web :8080 -> WTS :3001) requiere una sesión
+// La cadena completa (coffecode-web :8080 -> Terminal Celular :3100) requiere una sesión
 // iniciada con Google; se comprueba aparte con una petición sin cookie (302/401).
 
 import http from 'http'
+import os from 'os'
 import { readFileSync } from 'fs'
 
-const WTS_DIR = process.env.WTS_DIR || ((process.env.HOME || '/home/martin') + '/Whatsapp-teamSync')
+const TC_DIR = process.env.TC_DIR || ((process.env.HOME || '/home/martin') + '/terminal-celular')
 const EMAIL = process.env.EMAIL || 'user@example.com'
 const UA = 'tc-smoke'
 const OC_HOST = process.env.OC_HOST || '127.0.0.1'
 const OC_PORT = Number(process.env.OC_PORT || 4096)
 const FRONT = process.env.FRONT || 'http://127.0.0.1:8080'
 
-process.env.DB_PATH = process.env.DB_PATH || WTS_DIR + '/server/data/metrics.db'
+process.env.DATA_DIR = process.env.DATA_DIR || (os.tmpdir() + '/tc-smoke-data-' + process.pid)
 process.env.APP_DIR = process.env.APP_DIR || ((process.env.HOME || '/home/martin') + '/terminal-celular/app')
 process.env.ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS || 'coffecode.lat'
 if (!process.env.OC_PASSWORD) {
   try {
-    process.env.OC_PASSWORD = readFileSync((process.env.HOME || '') + '/.config/terminal-celular/oc-password', 'utf8').trim()
+    const m = readFileSync((process.env.HOME || '') + '/.config/terminal-celular/env', 'utf8').match(/^OC_PASSWORD=(.*)$/m)
+    if (m) process.env.OC_PASSWORD = m[1].trim()
   } catch {}
 }
 
-const auth = await import(WTS_DIR + '/server/dist/server/src/auth.js')
-const { handleAppRequest } = await import(WTS_DIR + '/server/dist/server/src/opencode-app.js')
+const auth = await import(TC_DIR + '/dist/auth.js')
+const { handleAppRequest } = await import(TC_DIR + '/dist/opencode-app.js')
 
 let pass = 0
 let fail = 0

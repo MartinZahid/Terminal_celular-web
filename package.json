@@ -1,0 +1,19 @@
+{
+  "name": "terminal-celular",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "App movil (PWA) + terminal web para opencode, servida por su propio proceso.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.3.0"
+  }
+}

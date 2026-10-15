@@ -1,7 +1,7 @@
 // Suite de integración de handleAppRequest contra un upstream FALSO que
 // simula opencode (no hace falta que opencode esté corriendo).
 // Uso: node test/proxy.test.mjs
-// Requiere el WTS compilado (server/dist); ubícalo con $WTS_DIR o ~/Whatsapp-teamSync.
+// Requiere el servicio compilado (dist/) en la raíz de este repo.
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
@@ -9,7 +9,7 @@ import fs from 'node:fs'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const WTS = process.env.WTS_DIR || path.join(os.homedir(), 'Whatsapp-teamSync')
+const TC = path.join(__dirname, '..')
 
 // --- Upstream falso: registra lo que recibe y responde como opencode ---
 const calls = []
@@ -51,11 +51,11 @@ process.env.OC2_HOST = '127.0.0.1'
 process.env.OC2_PORT = String(UP_PORT)
 process.env.OC2_PASSWORD = 'testpw2'
 process.env.APP_DIR = path.join(__dirname, '..', 'app')
-process.env.DB_PATH = path.join(os.tmpdir(), 'tc-proxy-test-' + process.pid + '.db')
+process.env.DATA_DIR = path.join(os.tmpdir(), 'tc-proxy-data-' + process.pid)
 delete process.env.ALLOWED_ORIGINS
 
-const auth = await import(pathToFileURL(path.join(WTS, 'server/dist/server/src/auth.js')).href)
-const { handleAppRequest } = await import(pathToFileURL(path.join(WTS, 'server/dist/server/src/opencode-app.js')).href)
+const auth = await import(pathToFileURL(path.join(TC, 'dist/auth.js')).href)
+const { handleAppRequest } = await import(pathToFileURL(path.join(TC, 'dist/opencode-app.js')).href)
 
 const EMAIL = 'test@example.com'
 const UA = 'tc-proxy-test'

@@ -1,0 +1,19 @@
+[Unit]
+Description=Terminal Celular (app movil opencode + terminal xterm)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/terminal-celular
+Environment=PATH=%h/.opencode/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=%h/.config/terminal-celular/env
+Environment=PORT=3100
+Environment=HOST=127.0.0.1
+ExecStart=/usr/bin/node %h/terminal-celular/dist/standalone.js
+Restart=on-failure
+RestartSec=3
+KillMode=process
+TimeoutStopSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Instala Terminal Celular: servicio de opencode + integración en WTS/coffecode-web.
+# Instala Terminal Celular: servicio independiente (app móvil + terminal PC + auth).
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WTS_DIR="${WTS_DIR:-$HOME/Whatsapp-teamSync}"
 COFFE_DIR="${COFFE_DIR:-$HOME/coffecode-web}"
 OC_PORT="${OC_PORT:-4096}"
 APP_DIR="${APP_DIR:-$REPO_DIR/app}"
 USER_UNIT_DIR="$HOME/.config/systemd/user"
 ENV_DIR="$HOME/.config/terminal-celular"
 ENV_FILE="$ENV_DIR/env"
+DATA_DIR="${DATA_DIR:-$ENV_DIR/data}"
 ENVFILE_LINE="EnvironmentFile=%h/.config/terminal-celular/env"
 
 # Asegura EnvironmentFile= en una unit systemd (idempotente).
@@ -33,14 +33,17 @@ set_kv() {
   fi
 }
 
-echo "==> 1/7  Contraseña y variables de entorno"
-mkdir -p "$ENV_DIR"
+echo "==> 1/6  Contraseña, datos y variables de entorno"
+mkdir -p "$ENV_DIR" "$DATA_DIR"
+chmod 700 "$DATA_DIR"
 if ! grep -q '^OPENCODE_SERVER_PASSWORD=' "$ENV_FILE" 2>/dev/null; then
   OC_PW="$(head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 32)"
   ( umask 077; printf '%s\n' "OC_PASSWORD=$OC_PW" "OPENCODE_SERVER_PASSWORD=$OC_PW" > "$ENV_FILE" )
 fi
 set_kv "$ENV_FILE" OC_PASSWORD "$(grep '^OPENCODE_SERVER_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)"
 set_kv "$ENV_FILE" APP_DIR "$APP_DIR"
+# DATA_DIR debe ser absoluto: systemd NO expande %h dentro de EnvironmentFile.
+set_kv "$ENV_FILE" DATA_DIR "$DATA_DIR"
 set_kv "$ENV_FILE" ALLOWED_ORIGINS "${ALLOWED_ORIGINS:-coffecode.lat}"
 # Destino principal de opencode (la máquina local).
 set_kv "$ENV_FILE" OC_HOST "${OC_HOST:-127.0.0.1}"
@@ -62,12 +65,12 @@ if [ -n "${TERMINAL_SSH_HOST:-}" ]; then
 fi
 chmod 600 "$ENV_FILE"
 # Limpieza de instalaciones previas (secretos en texto plano + archivo viejo).
-for f in "$USER_UNIT_DIR/opencode-serve.service" "$USER_UNIT_DIR/whatsapp-teamsync.service"; do
+for f in "$USER_UNIT_DIR/opencode-serve.service" "$USER_UNIT_DIR/whatsapp-teamsync.service" "$USER_UNIT_DIR/terminal-celular.service"; do
   [ -f "$f" ] && sed -i '/^Environment=\(OC_PASSWORD\|OPENCODE_SERVER_PASSWORD\)=/d' "$f"
 done
 rm -f "$ENV_DIR/oc-password"
 
-echo "==> 2/7  Servicio systemd --user de opencode"
+echo "==> 2/6  Servicio systemd --user de opencode"
 mkdir -p "$USER_UNIT_DIR"
 cp "$REPO_DIR/deploy/opencode-serve.service" "$USER_UNIT_DIR/opencode-serve.service"
 set_envfile "$USER_UNIT_DIR/opencode-serve.service"
@@ -75,21 +78,32 @@ systemctl --user daemon-reload
 systemctl --user enable --now opencode-serve.service
 systemctl --user restart opencode-serve.service
 
-echo "==> 3/7  Copiar módulo de integración al server WTS"
-cp "$REPO_DIR/server/opencode-app.ts" "$WTS_DIR/server/src/opencode-app.ts"
+echo "==> 3/6  Compilar el servicio Terminal Celular"
+# NODE_ENV=production haría que npm omita devDependencies (typescript) → forzamos.
+( cd "$REPO_DIR" && npm install --include=dev && npm run build )
 
-echo "==> 4/7  Aplicar enganches (idempotente)"
-python3 "$REPO_DIR/deploy/patch.py" "$WTS_DIR" "$COFFE_DIR"
-
-echo "==> 5/7  Configurar WTS (EnvironmentFile)"
-set_envfile "$USER_UNIT_DIR/whatsapp-teamsync.service"
+echo "==> 4/6  Servicio systemd --user de Terminal Celular"
+cp "$REPO_DIR/deploy/terminal-celular.service" "$USER_UNIT_DIR/terminal-celular.service"
+set_envfile "$USER_UNIT_DIR/terminal-celular.service"
 systemctl --user daemon-reload
+systemctl --user enable --now terminal-celular.service
+systemctl --user restart terminal-celular.service
 
-echo "==> 6/7  Recompilar server WTS"
-( cd "$WTS_DIR" && npm run build:server )
+echo "==> 5/6  Migrar google-oauth.json"
+if [ ! -f "$DATA_DIR/google-oauth.json" ]; then
+  SRC="$HOME/Whatsapp-teamSync/server/data/google-oauth.json"
+  if [ -f "$SRC" ]; then
+    cp "$SRC" "$DATA_DIR/google-oauth.json"
+    chmod 600 "$DATA_DIR/google-oauth.json"
+    echo "  copiado desde $SRC"
+  else
+    echo "  AVISO: no hay google-oauth.json; configura el OAuth de Google en $DATA_DIR"
+  fi
+else
+  echo "  ya existe $DATA_DIR/google-oauth.json"
+fi
 
-echo "==> 7/7  Reiniciar servidores"
-systemctl --user restart whatsapp-teamsync.service
+echo "==> 6/6  Recargar coffecode-web"
 # coffecode-web es un servicio de sistema con Restart=always; matar el proceso
 # hace que systemd lo relance con el código nuevo, sin necesitar sudo.
 pid="$(ss -ltnp 2>/dev/null | grep ":8080 " | grep -oP 'pid=\K[0-9]+' | head -1 || true)"
@@ -102,5 +116,6 @@ fi
 
 echo
 echo "Listo. Abre https://coffecode.lat/app en el celular."
-echo "opencode serve escucha en 127.0.0.1:$OC_PORT (Basic auth, usuario 'opencode')."
-echo "Variables en $ENV_FILE (chmod 600)."
+echo "Servicio Terminal Celular en 127.0.0.1:3100; opencode en 127.0.0.1:$OC_PORT (Basic auth)."
+echo "Variables en $ENV_FILE (chmod 600); datos en $DATA_DIR."
+echo "Recuerda enrutar /app, /oc, /oc2, /auth y /terminal a :3100 en coffecode-web."

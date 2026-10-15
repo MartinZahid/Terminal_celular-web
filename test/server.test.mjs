@@ -1,20 +1,20 @@
 // Tests de las funciones puras del proxy.
 // Uso: node --test test/server.test.mjs
-// Requiere que el server WTS esté compilado (server/dist). Ubica el proyecto
-// WTS con $WTS_DIR o ~/Whatsapp-teamSync.
+// Requiere el servicio compilado (dist/) en la raíz de este repo.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import os from 'node:os'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 // Sin opencode no arrancar el keepalive (colgaría el test); sin heredar la
 // allowlist de producción (haría el test no determinista).
 process.env.OC_KEEPALIVE = '0'
 delete process.env.ALLOWED_ORIGINS
+process.env.DATA_DIR = path.join(os.tmpdir(), 'tc-server-test-' + process.pid)
 
-const WTS = process.env.WTS_DIR || path.join(os.homedir(), 'Whatsapp-teamSync')
-const mod = await import(pathToFileURL(path.join(WTS, 'server/dist/server/src/opencode-app.js')).href)
+const DIST = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist')
+const mod = await import(pathToFileURL(path.join(DIST, 'opencode-app.js')).href)
 const { allowedPath, sameOriginOk, sanitize } = mod
 
 test('allowedPath permite las rutas que usa la app', () => {
